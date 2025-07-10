@@ -1,0 +1,19 @@
+services:
+  asterisk:
+    image: ghcr.io/asterisk/asterisk:20
+    container_name: asterisk
+    network_mode: host # we need raw UDP 10k‑20k
+    volumes:
+      - ./asterisk/:/etc/asterisk/
+    environment:
+      - TZ=America/Indiana/Indianapolis
+    restart: unless-stopped
+
+  aiworker:
+    build: ./aiworker # see Dockerfile below
+    network_mode: host # UDP sockets
+    environment:
+      - WHISPER_URL=http://192.168.1.70:9000/stream
+      - OLLAMA_URL=http://192.168.1.71:11434/v1/chat/completions
+      - KOKORO_URL=http://192.168.1.72:8000/api
+    restart: unless-stopped
