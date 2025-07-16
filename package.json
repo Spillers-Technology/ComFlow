@@ -10,6 +10,7 @@
         "test": "echo \"Error: no test specified\" && exit 1"
     },
     "dependencies": {
+        "@fonoster/streams": "^0.15.3",
         "axios": "^1.10.0",
         "dgram": "^1.0.1",
         "express": "^5.1.0",

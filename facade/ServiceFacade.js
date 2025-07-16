@@ -1,194 +1,74 @@
-// aiworker/facade/ServiceFacade.js
-import { spawn } from "child_process";
-import { once } from "events";
-
 export class ServiceFacade {
-    constructor({ transcriber, llm, tts, converter, reverse, socket, logger }) {
-        this.transcriber = transcriber;
-        this.llm = llm;
-        this.tts = tts;
-        this.converter = converter;
-        this.reverse = reverse;
-        this.socket = socket;
-        this.logger = logger;
+    constructor(deps) {
+        Object.assign(this, deps);
+        this.pcmBuffer = Buffer.alloc(0);
+        this.flushInterval = setInterval(() => this._flush(), 150); // every 150 ms
+        this.queue = [];
+        this.busy = false;
     }
 
-    /**
-     * Full call flow with streaming and metrics:
-     * PCM → WAV → Whisper (stream/batch) → LLM (stream/batch) → TTS (stream/batch) → PCM chunks → RTP
-     * @param {{ pcm: Buffer, rinfo: object, sendPort: number, sendHost: string }} params
-     */
-    async processAudio({ pcm, rinfo, sendPort, sendHost }) {
-        const metrics = {};
-        metrics.start = Date.now();
+    // called by your RTP socket on every packet
+    enqueuePacket(pcm, rinfo, sendPort, sendHost) {
+        this.pcmBuffer = Buffer.concat([this.pcmBuffer, pcm]);
+        this.currentRinfo = { rinfo, sendPort, sendHost };
+    }
+
+    // flush out whatever PCM we have every interval
+    async _flush() {
+        if (this.pcmBuffer.length < 1600) return; // wait for at least ~100 ms @8 kHz
+        const chunk = this.pcmBuffer;
+        this.pcmBuffer = Buffer.alloc(0);
+        this.queue.push({ chunk, ...this.currentRinfo });
+        this._processQueue();
+    }
+
+    async _processQueue() {
+        if (this.busy || !this.queue.length) return;
+        this.busy = true;
+        const { chunk, rinfo, sendPort, sendHost } = this.queue.shift();
+
         try {
-            this.logger.visit(
-                "ServiceFacade",
-                `Received ${pcm.length} bytes of PCM from ${rinfo.address}:${rinfo.port}`,
-            );
+            // 1) PCM→WAV
+            const wav = await this.converter.convert({ pcmBuffer: chunk });
 
-            // 1. Convert raw PCM → WAV
-            metrics.convertStart = Date.now();
-            const wavBuffer = await this.converter.convert({ pcmBuffer: pcm });
-            metrics.convertEnd = Date.now();
-            this.logger.visit(
-                "ServiceFacade",
-                "Converted PCM to WAV for transcription",
-            );
+            // 2) Transcript chunk
+            const partial = await this.transcriber.transcribe(wav);
+            // you could buffer these or send immediately as interim to LLM:
 
-            // 2. Transcription (stream/batch)
-            metrics.transcribeStart = Date.now();
-            let transcript = "";
-            // onPartial callback for streaming transcripts
-            const onTranscribeChunk = (chunk) => {
-                this.logger.visit(
-                    "ServiceFacade",
-                    `Partial transcript: "${chunk}"`,
-                );
-                transcript += chunk;
-            };
-            try {
-                const result = await this.transcriber.transcribe(
-                    wavBuffer,
-                    onTranscribeChunk,
-                );
-                // If batch mode, result is full transcript
-                if (result) transcript = result;
-            } catch (e) {
-                this.logger.visit(
-                    "ServiceFacade",
-                    `Streamed transcription failed, falling back: ${e.message}`,
-                    "WARN",
-                );
-                transcript = await this.transcriber.transcribe(wavBuffer);
-            }
-            metrics.transcribeEnd = Date.now();
-            this.logger.visit(
-                "ServiceFacade",
-                `Transcription result: "${transcript}"`,
-            );
+            // 3) LLM query on this partial (treat as continuation context)
+            const replyText = await this.llm.query(partial);
 
-            // 3. LLM query (stream/batch)
-            metrics.llmStart = Date.now();
-            let llmOutput = "";
-            const onLlmChunk = (chunk) => {
-                this.logger.visit(
-                    "ServiceFacade",
-                    `Partial LLM output: "${chunk}"`,
-                );
-                llmOutput += chunk;
-            };
-            try {
-                const result = await this.llm.query(transcript, onLlmChunk);
-                if (result) llmOutput = result;
-            } catch (e) {
-                this.logger.visit(
-                    "ServiceFacade",
-                    `Streamed LLM failed, falling back: ${e.message}`,
-                    "WARN",
-                );
-                llmOutput = await this.llm.query(transcript);
-            }
-            metrics.llmEnd = Date.now();
-            this.logger.visit("ServiceFacade", `LLM response: "${llmOutput}"`);
-
-            // 4. TTS synthesis and RTP streaming
-            metrics.ttsStart = Date.now();
-            // Spawn ffmpeg for WAV → raw PCM
-            const ffmpegProc = spawn("ffmpeg", [
-                "-hide_banner",
-                "-i",
-                "pipe:0",
-                "-f",
-                "s16le",
-                "-ar",
-                "8000",
-                "-ac",
-                "1",
-                "pipe:1",
+            // 4) TTS this replyText chunk
+            // spawn ffmpeg only once per chunk
+            const ffmpeg = spawn("ffmpeg", [
+                /* as before */
             ]);
-            // Handle PCM chunks from ffmpeg stdout
-            let pcmBufferResidue = Buffer.alloc(0);
-            ffmpegProc.stdout.on("data", (data) => {
-                pcmBufferResidue = Buffer.concat([pcmBufferResidue, data]);
-                // Send fixed-size chunks (20ms @8kHz = 160 bytes)
-                while (pcmBufferResidue.length >= 160) {
-                    const chunk = pcmBufferResidue.slice(0, 160);
-                    pcmBufferResidue = pcmBufferResidue.slice(160);
-                    this.socket.send(
-                        chunk,
-                        0,
-                        chunk.length,
-                        sendPort,
-                        sendHost,
-                    );
-                }
-            });
-            ffmpegProc.on("error", (err) => {
-                this.logger.visit(
-                    "ServiceFacade",
-                    `FFmpeg error: ${err.message}`,
-                    "ERROR",
-                );
-            });
-
-            // Attempt streaming TTS
-            try {
-                await this.tts.synthesize(llmOutput, (wavChunk) => {
-                    ffmpegProc.stdin.write(wavChunk);
-                });
-                // Signal end of WAV input
-                ffmpegProc.stdin.end();
-                // Wait for ffmpeg to finish
-                await once(ffmpegProc, "close");
-            } catch (e) {
-                this.logger.visit(
-                    "ServiceFacade",
-                    `Streaming TTS failed, falling back: ${e.message}`,
-                    "WARN",
-                );
-                // Clean up ffmpeg
-                try {
-                    ffmpegProc.stdin.end();
-                } catch {}
-                ffmpegProc.kill();
-                // Batch TTS → full WAV buffer
-                const ttsWav = await this.tts.synthesize(llmOutput);
-                // Convert full WAV → PCM chunks
-                await this.reverse.stream({
-                    wavBuffer: ttsWav,
-                    onChunk: (chunk) => {
-                        this.socket.send(
-                            chunk,
-                            0,
-                            chunk.length,
-                            sendPort,
-                            sendHost,
-                        );
-                    },
-                });
-            }
-            metrics.ttsEnd = Date.now();
-
-            // 5. Log pipeline metrics
-            metrics.end = Date.now();
-            const total = metrics.end - metrics.start;
-            const convertTime = metrics.convertEnd - metrics.convertStart;
-            const transcribeTime =
-                metrics.transcribeEnd - metrics.transcribeStart;
-            const llmTime = metrics.llmEnd - metrics.llmStart;
-            const ttsTime = metrics.ttsEnd - metrics.ttsStart;
-            this.logger.visit(
-                "ServiceFacade",
-                `Metrics (ms): total=${total}, convert=${convertTime}, transcribe=${transcribeTime}, llm=${llmTime}, tts=${ttsTime}`,
+            ffmpeg.stdout.on("data", (data) =>
+                this._sendPcmPackets(data, sendPort, sendHost),
             );
+            ffmpeg.stdin.write(await this.tts.synthesize(replyText));
+            ffmpeg.stdin.end();
+            await once(ffmpeg, "close");
         } catch (err) {
             this.logger.visit(
                 "ServiceFacade",
-                `Processing error: ${err.message}`,
+                `Chunk processing error: ${err.message}`,
                 "ERROR",
             );
-            throw err;
+        } finally {
+            this.busy = false;
+            // trigger next chunk
+            this._processQueue();
         }
+    }
+
+    _sendPcmPackets(data, port, host) {
+        let buf = Buffer.concat([this._residue || Buffer.alloc(0), data]);
+        while (buf.length >= 160) {
+            const packet = buf.slice(0, 160);
+            buf = buf.slice(160);
+            this.socket.send(packet, 0, 160, port, host);
+        }
+        this._residue = buf;
     }
 }
