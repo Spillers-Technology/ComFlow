@@ -1,7 +1,16 @@
-FROM node:20-alpine
-RUN apk add --no-cache sox               # audio processing CLI
+FROM node:alpine
+
 WORKDIR /app
-COPY package*.json ./
+
+# Install deps first for caching
+COPY package.json package-lock.json ./
 RUN npm ci
+
+# Copy source
 COPY . .
-CMD ["node", "index.js"]
+
+EXPOSE 5173
+
+ENV CHOKIDAR_USEPOLLING=true
+
+CMD ["npm", "run", "dev", "--host"]

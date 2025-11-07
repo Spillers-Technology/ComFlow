@@ -1,110 +1,73 @@
-#  AI-SIP Voice Agent Dashboard 🎧✨
+# React + TypeScript + Vite
 
-*An intuitive, delightful dashboard to turn SIP extensions into intelligent conversational agents—powered by AI.*
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## 🚀 Overview
+Currently, two official plugins are available:
 
-Welcome to **AI-SIP Voice Agent Dashboard**, a sleek web-based administration interface built on the robust **drachtio** SIP stack, designed specifically for creating and managing AI-driven voice agents for SIP-based phone systems. Each extension you manage here can independently handle calls, transforming audio conversations into seamless dialogues with powerful Large Language Models (LLMs) like **ChatGPT** and **Ollama**.
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
----
+## React Compiler
 
-## 🌟 Why does this exist?
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-* **Elevate your SIP** 📞: Plain phones are so last century. Upgrade to smart conversational agents without expensive licenses or complex setups.
-* **Personalized Conversations** 💬: Your agents don't just answer—they understand, respond naturally, and hand off to humans gracefully.
-* **Plug-and-Play Simplicity** 🔌: Just plug in your SIP credentials, configure your preferred AI backend, and start making your extensions smarter instantly.
+## Expanding the ESLint configuration
 
----
+If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
 
-## 🎯 Core Features
+```js
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
 
-### 📡 SIP Integration with Drachtio
+      // Remove tseslint.configs.recommended and replace with this
+      tseslint.configs.recommendedTypeChecked,
+      // Alternatively, use this for stricter rules
+      tseslint.configs.strictTypeChecked,
+      // Optionally, add this for stylistic rules
+      tseslint.configs.stylisticTypeChecked,
 
-* Simple SIP credential management for multiple extensions.
-* Built on **drachtio** for industry-grade reliability and easy scaling.
-
-### 🤖 AI-Powered Conversation
-
-* Real-time conversational AI integration.
-* Supports:
-
-  * ✅ OpenAI's **ChatGPT**
-  * ✅ **Ollama** (OpenAI-compatible local models)
-* Speech-to-Text (**STT**) exclusively powered by **ElevenLabs** for superior accuracy and ultra-low latency.
-
-### 🎙️ Real-Time Audio Streaming
-
-* Seamlessly convert live SIP audio streams to STT and back to crystal-clear TTS audio.
-* Visual latency indicators ensure you're always aware of real-time audio delivery performance.
-
-### ⚙️ Admin Console & UX
-
-* Clean, intuitive, modern dashboard interface.
-* Fine-tune performance, latency, and audio quality with easy-to-use sliders and toggles.
-* Color-coded statuses to instantly understand agent health and activity:
-
-  * 🟢 Green: Agent active and healthy.
-  * 🟡 Yellow: Latency warnings.
-  * 🔴 Red: Agent inactive or critical errors.
-
----
-
-## 🎨 Interface Highlights
-
-```plaintext
-+-------------------------------------------------------+
-| 🎧 AI-SIP Voice Agent Dashboard                        |
-|                                                       |
-| [🟢 Extension 1001] [🟢 Extension 1002] [🟡 Extension 1003] |
-|                                                       |
-| 🔈 Speed / Latency: 120ms ✅                           |
-| 🔥 Active Calls: 3                                    |
-|                                                       |
-| [⚙️ Configure SIP] [🤖 Choose AI Backend] [🔧 Audio Tweaks] |
-+-------------------------------------------------------+
+      // Other configs...
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
 ```
 
----
+You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
 
-## 🚧 Project Scope & Purpose
+```js
+// eslint.config.js
+import reactX from 'eslint-plugin-react-x'
+import reactDom from 'eslint-plugin-react-dom'
 
-**Scope**:
-
-* Manage multiple SIP credentials and handle multiple simultaneous calls.
-* Provide a unified web UI to configure extensions, manage SIP credentials, and monitor call quality and agent performance.
-* Integrate with AI endpoints (OpenAI and Ollama) via REST APIs.
-* Use ElevenLabs exclusively for STT to ensure premium quality and speed.
-* Provide visual real-time metrics to monitor audio streaming performance.
-
-**Purpose**:
-
-* To empower organizations to easily deploy AI-powered phone agents.
-* Enhance customer interactions by delivering seamless and intelligent automated voice conversations.
-* Minimize reliance on costly enterprise licenses by leveraging open and compatible tools.
-
----
-
-## 🛠️ Tech Stack
-
-* **Backend:** Node.js, Drachtio SIP server, ElevenLabs STT
-* **Frontend:** React.js, Tailwind CSS, Framer Motion (for delightful UI interactions)
-* **AI Integration:** OpenAI GPT-4o (via API), Ollama (local model deployment)
-* **Deployment:** Docker & Docker Compose for quick, reliable setup
-
----
-
-## 🎈 Getting Started
-
-Clone the repo, set up your `.env` credentials, and run:
-
-```bash
-docker-compose up
+export default defineConfig([
+  globalIgnores(['dist']),
+  {
+    files: ['**/*.{ts,tsx}'],
+    extends: [
+      // Other configs...
+      // Enable lint rules for React
+      reactX.configs['recommended-typescript'],
+      // Enable lint rules for React DOM
+      reactDom.configs.recommended,
+    ],
+    languageOptions: {
+      parserOptions: {
+        project: ['./tsconfig.node.json', './tsconfig.app.json'],
+        tsconfigRootDir: import.meta.dirname,
+      },
+      // other options...
+    },
+  },
+])
 ```
-
-You're ready to answer calls with the smarts and charm of cutting-edge conversational AI!
-
----
-
-## 📞 Questions? Feedback?
-
-Reach out—we're excited to keep improving!
