@@ -6,6 +6,7 @@ import { createWebhookRouter } from './routes/webhooks.js'
 import { config } from './config.js'
 import { HttpError } from './lib/errors.js'
 import { FakeTranscriptExtractionProvider } from './providers/extractor/fake.js'
+import { LlmTranscriptExtractionProvider } from './providers/extractor/llm.js'
 import { FakeSpeechToTextProvider } from './providers/stt/fake.js'
 import { FakeTelephonyProvider } from './providers/telephony/fake.js'
 import { seedFakeData } from './seed/fakeData.js'
@@ -20,9 +21,11 @@ export function createApp() {
   const transcriptionService = new TranscriptionService(
     new FakeSpeechToTextProvider()
   )
-  const extractionService = new ExtractionService(
-    new FakeTranscriptExtractionProvider()
-  )
+  const extractionProvider =
+    config.mode === 'real' && config.anthropicApiKey
+      ? new LlmTranscriptExtractionProvider(config.anthropicApiKey)
+      : new FakeTranscriptExtractionProvider()
+  const extractionService = new ExtractionService(extractionProvider)
   const callIngestionService = new CallIngestionService(
     transcriptionService,
     extractionService

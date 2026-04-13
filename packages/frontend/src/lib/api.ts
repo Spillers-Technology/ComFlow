@@ -26,10 +26,11 @@ async function request<T>(input: RequestInfo, init: RequestInit, schema: {
   return schema.parse(json)
 }
 
-export function getCalls(query?: { status?: string; q?: string }) {
+export function getCalls(query?: { status?: string; q?: string; intent?: string }) {
   const params = new URLSearchParams()
   if (query?.status) params.set('status', query.status)
   if (query?.q) params.set('q', query.q)
+  if (query?.intent) params.set('intent', query.intent)
 
   return request(
     `/api/calls${params.size ? `?${params.toString()}` : ''}`,

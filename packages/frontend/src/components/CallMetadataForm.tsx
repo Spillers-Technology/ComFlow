@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Button,
   Card,
@@ -10,6 +10,7 @@ import {
   Select,
   Stack,
   TextField,
+  Typography,
 } from '@mui/material'
 import {
   CallIntentSchema,
@@ -56,6 +57,19 @@ export function CallMetadataForm({
     })
   }, [call])
 
+  const isDirty = useMemo(() => {
+    return (
+      form.callerName !== call.callerName ||
+      form.company !== call.company ||
+      form.callbackNumber !== call.callbackNumber ||
+      form.intent !== call.intent ||
+      form.urgency !== call.urgency ||
+      form.summary !== call.summary ||
+      form.status !== call.status ||
+      form.assignedQueue !== call.assignedQueue
+    )
+  }, [form, call])
+
   return (
     <Card>
       <CardHeader title="Review metadata" />
@@ -96,7 +110,7 @@ export function CallMetadataForm({
             >
               {intents.map(intent => (
                 <MenuItem key={intent} value={intent}>
-                  {intent.replace('_', ' ')}
+                  {intent.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
                 </MenuItem>
               ))}
             </Select>
@@ -115,7 +129,7 @@ export function CallMetadataForm({
             >
               {urgencies.map(urgency => (
                 <MenuItem key={urgency} value={urgency}>
-                  {urgency}
+                  {urgency.charAt(0).toUpperCase() + urgency.slice(1)}
                 </MenuItem>
               ))}
             </Select>
@@ -134,7 +148,7 @@ export function CallMetadataForm({
             >
               {statuses.map(status => (
                 <MenuItem key={status} value={status}>
-                  {status}
+                  {status.charAt(0).toUpperCase() + status.slice(1)}
                 </MenuItem>
               ))}
             </Select>
@@ -158,9 +172,14 @@ export function CallMetadataForm({
               setForm(current => ({ ...current, summary: event.target.value || null }))
             }
           />
+          {isDirty && (
+            <Typography variant="caption" color="warning.main">
+              Unsaved changes
+            </Typography>
+          )}
           <Button
             variant="contained"
-            disabled={saving}
+            disabled={saving || !isDirty}
             onClick={() => void onSave(form)}
           >
             {saving ? 'Saving...' : 'Save review'}

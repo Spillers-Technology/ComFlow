@@ -10,6 +10,7 @@
     "seed": "tsx src/seed/runSeed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
     "@comflow/shared": "file:../shared",
     "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",

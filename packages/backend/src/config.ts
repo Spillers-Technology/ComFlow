@@ -12,4 +12,5 @@ export const config = {
   databasePath: path.join(dataDir, 'comflow.db'),
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
   seedDemo: process.env.COMFLOW_SEED_DEMO !== 'false',
+  anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? '',
 }

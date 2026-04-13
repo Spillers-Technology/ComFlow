@@ -4,6 +4,8 @@ import {
   Button,
   Container,
   Grid,
+  Skeleton,
+  Snackbar,
   Stack,
   Typography,
 } from '@mui/material'
@@ -18,7 +20,14 @@ import { CallStatusBadge } from '../components/CallStatusBadge'
 import { NotesPanel } from '../components/NotesPanel'
 import { RecordingPlayer } from '../components/RecordingPlayer'
 import { TranscriptPanel } from '../components/TranscriptPanel'
+import { UrgencyBadge } from '../components/UrgencyBadge'
 import { addCallNote, getCall, patchCall } from '../lib/api'
+
+interface SnackbarState {
+  open: boolean
+  message: string
+  severity: 'success' | 'error'
+}
 
 export function CallDetailPage() {
   const { id } = useParams()
@@ -26,6 +35,11 @@ export function CallDetailPage() {
   const [detail, setDetail] = useState<GetCallResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [snackbar, setSnackbar] = useState<SnackbarState>({
+    open: false,
+    message: '',
+    severity: 'success',
+  })
 
   useEffect(() => {
     if (!id) return
@@ -49,6 +63,13 @@ export function CallDetailPage() {
     try {
       await patchCall(id, payload)
       await load()
+      setSnackbar({ open: true, message: 'Changes saved.', severity: 'success' })
+    } catch (reason) {
+      setSnackbar({
+        open: true,
+        message: (reason as Error).message,
+        severity: 'error',
+      })
     } finally {
       setSaving(false)
     }
@@ -58,6 +79,10 @@ export function CallDetailPage() {
     if (!id) return
     await addCallNote(id, payload)
     await load()
+  }
+
+  function closeSnackbar() {
+    setSnackbar(s => ({ ...s, open: false }))
   }
 
   if (!id) {
@@ -72,6 +97,25 @@ export function CallDetailPage() {
         </Button>
 
         {error && <Alert severity="error">{error}</Alert>}
+
+        {!detail && !error && (
+          <Stack spacing={3}>
+            <Skeleton variant="text" width={300} height={56} />
+            <Skeleton variant="text" width={240} height={28} />
+            <Grid container spacing={3}>
+              <Grid size={{ xs: 12, md: 7 }}>
+                <Stack spacing={3}>
+                  <Skeleton variant="rectangular" height={120} sx={{ borderRadius: 2 }} />
+                  <Skeleton variant="rectangular" height={220} sx={{ borderRadius: 2 }} />
+                  <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 2 }} />
+                </Stack>
+              </Grid>
+              <Grid size={{ xs: 12, md: 5 }}>
+                <Skeleton variant="rectangular" height={540} sx={{ borderRadius: 2 }} />
+              </Grid>
+            </Grid>
+          </Stack>
+        )}
 
         {detail && (
           <>
@@ -95,11 +139,29 @@ export function CallDetailPage() {
           </>
         )}
       </Stack>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={closeSnackbar}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={closeSnackbar}
+          severity={snackbar.severity}
+          variant="filled"
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   )
 }
 
 function CallSummaryHeader({ call }: { call: CallRecord }) {
+  const formattedIntent = call.intent.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+
   return (
     <Stack spacing={1}>
       <Typography variant="h3">
@@ -108,12 +170,12 @@ function CallSummaryHeader({ call }: { call: CallRecord }) {
       <Typography color="text.secondary">
         {call.company ?? 'No company'} • {call.callbackNumber ?? 'No callback'}
       </Typography>
-      <Stack direction="row" spacing={1}>
+      <Stack direction="row" spacing={1} alignItems="center">
         <CallStatusBadge status={call.status} />
+        <UrgencyBadge urgency={call.urgency} />
         <Typography color="text.secondary">
-          Intent: {call.intent.replace('_', ' ')}
+          {formattedIntent}
         </Typography>
-        <Typography color="text.secondary">Urgency: {call.urgency}</Typography>
       </Stack>
     </Stack>
   )

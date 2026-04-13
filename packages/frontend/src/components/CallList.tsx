@@ -1,5 +1,6 @@
 import {
   Paper,
+  Skeleton,
   Table,
   TableBody,
   TableCell,
@@ -11,8 +12,15 @@ import {
 import { useNavigate } from 'react-router-dom'
 import { CallListItem } from '../../../shared/src/index.js'
 import { CallStatusBadge } from './CallStatusBadge'
+import { UrgencyBadge } from './UrgencyBadge'
 
-export function CallList({ items }: { items: CallListItem[] }) {
+function formatIntent(intent: string): string {
+  return intent.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+const SKELETON_ROWS = 5
+
+export function CallList({ items, isLoading }: { items: CallListItem[]; isLoading?: boolean }) {
   const navigate = useNavigate()
 
   return (
@@ -31,7 +39,28 @@ export function CallList({ items }: { items: CallListItem[] }) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {items.map(item => (
+          {isLoading && Array.from({ length: SKELETON_ROWS }).map((_, i) => (
+            <TableRow key={`skeleton-${i}`}>
+              <TableCell><Skeleton variant="text" /></TableCell>
+              <TableCell><Skeleton variant="text" /></TableCell>
+              <TableCell><Skeleton variant="text" /></TableCell>
+              <TableCell><Skeleton variant="text" /></TableCell>
+              <TableCell><Skeleton variant="text" width={60} /></TableCell>
+              <TableCell><Skeleton variant="text" width={70} /></TableCell>
+              <TableCell><Skeleton variant="text" /></TableCell>
+              <TableCell><Skeleton variant="text" /></TableCell>
+            </TableRow>
+          ))}
+
+          {!isLoading && items.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={8} align="center" sx={{ py: 6 }}>
+                <Typography color="text.secondary">No calls match your filters.</Typography>
+              </TableCell>
+            </TableRow>
+          )}
+
+          {!isLoading && items.map(item => (
             <TableRow
               key={item.id}
               hover
@@ -48,8 +77,10 @@ export function CallList({ items }: { items: CallListItem[] }) {
                 </Typography>
               </TableCell>
               <TableCell>{item.callbackNumber ?? 'Unknown'}</TableCell>
-              <TableCell>{item.intent.replace('_', ' ')}</TableCell>
-              <TableCell>{item.urgency}</TableCell>
+              <TableCell>{formatIntent(item.intent)}</TableCell>
+              <TableCell>
+                <UrgencyBadge urgency={item.urgency} />
+              </TableCell>
               <TableCell>
                 <CallStatusBadge status={item.status} />
               </TableCell>
