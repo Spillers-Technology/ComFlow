@@ -11,6 +11,10 @@ node_modules
 dist
 dist-ssr
 *.local
+packages/backend/data/*.db
+packages/backend/data/recordings/*
+!packages/backend/data/recordings/.gitkeep
+packages/*/dist
 
 # Editor directories and files
 .vscode/*
