@@ -1,14 +1,14 @@
 import { Router } from 'express'
-import { config } from '../config.js'
+import { EngineService } from '../services/engineService.js'
 
-export function createHealthRouter() {
+export function createHealthRouter(engineService: EngineService) {
   const router = Router()
 
   router.get('/', (_request, response) => {
     response.json({
       ok: true,
-      mode: config.mode,
       db: 'ok',
+      ...engineService.getSettingsResponse(),
     })
   })
 

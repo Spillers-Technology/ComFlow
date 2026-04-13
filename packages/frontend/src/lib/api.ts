@@ -1,10 +1,16 @@
 import {
+  CreateCallbackRequest,
+  CreateCallbackResponseSchema,
   CreateCallNoteInput,
   CreateCallNoteResponseSchema,
+  EngineTestResponseSchema,
+  GetEngineSettingsResponseSchema,
   GetCallResponseSchema,
   GetCallsResponseSchema,
   PatchCallResponseSchema,
   CallUpdateInput,
+  UpdateEngineSettingsInput,
+  UpdateEngineSettingsResponseSchema,
 } from '../../../shared/src/index.js'
 
 async function request<T>(input: RequestInfo, init: RequestInit, schema: {
@@ -62,5 +68,46 @@ export function addCallNote(id: string, payload: CreateCallNoteInput) {
       body: JSON.stringify(payload),
     },
     CreateCallNoteResponseSchema
+  )
+}
+
+export function getEngineSettings() {
+  return request(
+    '/api/settings/engines',
+    { method: 'GET' },
+    GetEngineSettingsResponseSchema
+  )
+}
+
+export function updateEngineSettings(payload: UpdateEngineSettingsInput) {
+  return request(
+    '/api/settings/engines',
+    {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    },
+    UpdateEngineSettingsResponseSchema
+  )
+}
+
+export function testEngine(engine: 'llm' | 'stt' | 'tts') {
+  return request(
+    `/api/settings/engines/test/${engine}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    },
+    EngineTestResponseSchema
+  )
+}
+
+export function createCallback(id: string, payload: CreateCallbackRequest) {
+  return request(
+    `/api/calls/${id}/callbacks`,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+    CreateCallbackResponseSchema
   )
 }

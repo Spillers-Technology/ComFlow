@@ -11,9 +11,14 @@ node_modules
 dist
 dist-ssr
 *.local
+.env
+.env.*
 packages/backend/data/*.db
+!*.example
 packages/backend/data/recordings/*
 !packages/backend/data/recordings/.gitkeep
+packages/backend/data/callbacks/*
+!packages/backend/data/callbacks/.gitkeep
 packages/*/dist
 
 # Editor directories and files

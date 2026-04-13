@@ -1,3 +1,5 @@
 export interface TextToSpeechProvider {
-  synthesize(input: { text: string }): Promise<{ filePath: string | null }>
+  synthesize(input: {
+    text: string
+  }): Promise<{ audio: Buffer; mimeType: string; extension: string }>
 }

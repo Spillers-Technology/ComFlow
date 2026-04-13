@@ -7,7 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint src --ext .ts",
-    "seed": "tsx src/seed/runSeed.ts"
+    "seed": "tsx src/seed/runSeed.ts",
+    "test": "npm run build && node ./dist/backend/src/testRunner.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",

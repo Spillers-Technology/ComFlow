@@ -3,8 +3,27 @@ import {
   CreateCallNoteInput,
 } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
+import { callbackRepository } from '../repositories/callbackRepository.js'
 import { callRepository, CallFilters } from '../repositories/callRepository.js'
 import { noteRepository } from '../repositories/noteRepository.js'
+
+function mapCallbackAttemptForApi(
+  attempt: ReturnType<typeof callbackRepository.listByCallId>[number]
+) {
+  return {
+    id: attempt.id,
+    callId: attempt.callId,
+    callbackNumber: attempt.callbackNumber,
+    notes: attempt.notes,
+    script: attempt.script,
+    status: attempt.status,
+    providerSnapshot: attempt.providerSnapshot,
+    audioMimeType: attempt.audioMimeType,
+    audioUrl: attempt.audioPath ? `/api/callbacks/${attempt.id}/audio` : null,
+    createdAt: attempt.createdAt,
+    updatedAt: attempt.updatedAt,
+  }
+}
 
 export class CallReviewService {
   listCalls(filters: CallFilters) {
@@ -20,6 +39,7 @@ export class CallReviewService {
     return {
       call,
       notes: noteRepository.listByCallId(id),
+      callbackAttempts: callbackRepository.listByCallId(id).map(mapCallbackAttemptForApi),
     }
   }
 

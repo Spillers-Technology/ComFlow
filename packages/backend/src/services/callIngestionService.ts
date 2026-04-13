@@ -8,8 +8,7 @@ import { config } from '../config.js'
 import { createSilentWav } from '../lib/audio.js'
 import { HttpError } from '../lib/errors.js'
 import { callRepository } from '../repositories/callRepository.js'
-import { ExtractionService } from './extractionService.js'
-import { TranscriptionService } from './transcriptionService.js'
+import { EngineService } from './engineService.js'
 
 function extensionForMimeType(mimeType: string): string {
   if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'mp3'
@@ -20,8 +19,7 @@ function extensionForMimeType(mimeType: string): string {
 
 export class CallIngestionService {
   constructor(
-    private readonly transcriptionService: TranscriptionService,
-    private readonly extractionService: ExtractionService
+    private readonly engineService: EngineService
   ) {}
 
   async createInboundCall(input: InboundTelephonyWebhookInput) {
@@ -33,7 +31,7 @@ export class CallIngestionService {
     })
 
     if (input.transcript) {
-      const extracted = await this.extractionService.extractFromTranscript(
+      const extracted = await this.engineService.extractFromTranscript(
         input.transcript
       )
 
@@ -82,12 +80,12 @@ export class CallIngestionService {
           transcript: input.transcript,
           rawTranscript: { source: 'recording-webhook-payload' },
         }
-      : await this.transcriptionService.transcribeRecording({
+      : await this.engineService.transcribeRecording({
           filePath: absolutePath,
           mimeType: input.mimeType,
         })
 
-    const extracted = await this.extractionService.extractFromTranscript(
+    const extracted = await this.engineService.extractFromTranscript(
       transcription.transcript
     )
 

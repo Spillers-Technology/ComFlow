@@ -1,9 +1,16 @@
 import { z } from 'zod'
+import { CallbackAttemptSchema } from './callback.js'
 import {
   CallListItemSchema,
   CallRecordSchema,
   ExtractedCallFieldsSchema,
 } from './call.js'
+import {
+  EngineKindSchema,
+  EngineReadinessMapSchema,
+  EngineSettingsSchema,
+  EngineTestResultSchema,
+} from './engine.js'
 import { CallNoteSchema } from './note.js'
 
 export const InboundTelephonyWebhookSchema = z.object({
@@ -29,6 +36,7 @@ export const GetCallsResponseSchema = z.object({
 export const GetCallResponseSchema = z.object({
   call: CallRecordSchema,
   notes: z.array(CallNoteSchema),
+  callbackAttempts: z.array(CallbackAttemptSchema),
   recordingUrl: z.string().nullable(),
 })
 
@@ -52,8 +60,25 @@ export const RecordingProcessedResponseSchema = z.object({
 
 export const HealthResponseSchema = z.object({
   ok: z.literal(true),
-  mode: z.enum(['fake', 'real']),
   db: z.literal('ok'),
+  settings: EngineSettingsSchema,
+  readiness: EngineReadinessMapSchema,
+})
+
+export const GetEngineSettingsResponseSchema = z.object({
+  settings: EngineSettingsSchema,
+  readiness: EngineReadinessMapSchema,
+})
+
+export const UpdateEngineSettingsResponseSchema =
+  GetEngineSettingsResponseSchema
+
+export const EngineTestRouteParamsSchema = z.object({
+  engine: EngineKindSchema,
+})
+
+export const EngineTestResponseSchema = z.object({
+  result: EngineTestResultSchema,
 })
 
 export const ApiErrorSchema = z.object({
@@ -75,4 +100,10 @@ export type CreateCallNoteResponse = z.infer<
   typeof CreateCallNoteResponseSchema
 >
 export type HealthResponse = z.infer<typeof HealthResponseSchema>
+export type GetEngineSettingsResponse = z.infer<
+  typeof GetEngineSettingsResponseSchema
+>
+export type UpdateEngineSettingsResponse = z.infer<
+  typeof UpdateEngineSettingsResponseSchema
+>
 export type ApiError = z.infer<typeof ApiErrorSchema>

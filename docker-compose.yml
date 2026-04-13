@@ -1,6 +1,29 @@
 services:
-  comflow-ui:
-    build: ./frontend
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm run dev:backend
+    ports:
+      - "3001:3001"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PORT=3001
+      - FRONTEND_ORIGIN=http://localhost:5173
+      - COMFLOW_SEED_DEMO=true
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: npm run dev:frontend
+    depends_on:
+      - backend
     ports:
       - "5173:5173"
     volumes:
@@ -8,3 +31,4 @@ services:
       - /app/node_modules
     environment:
       - CHOKIDAR_USEPOLLING=true
+      - VITE_API_PROXY_TARGET=http://backend:3001
