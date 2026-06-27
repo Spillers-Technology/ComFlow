@@ -1,16 +1,20 @@
 import {
   EngineKind,
   EngineReadinessMap,
+  EngineSecretKey,
+  EngineSecretSource,
+  EngineSecretStatusMap,
   EngineSettings,
   EngineSettingsSchema,
   EngineTestResult,
   ExtractedCallFieldsSchema,
   GetEngineSettingsResponse,
-  UpdateEngineSettingsInput,
-  UpdateEngineSettingsInputSchema,
+  UpdateEngineSettingsRequest,
+  UpdateEngineSettingsRequestSchema,
 } from '../../../shared/src/index.js'
 import { config } from '../config.js'
 import { HttpError } from '../lib/errors.js'
+import { engineSecretRepository } from '../repositories/engineSecretRepository.js'
 import { engineSettingsRepository } from '../repositories/engineSettingsRepository.js'
 import { AnthropicLanguageModelProvider } from '../providers/llm/anthropic.js'
 import { FakeLanguageModelProvider } from '../providers/llm/fake.js'
@@ -33,6 +37,8 @@ export class EngineService {
   }
 
   getReadiness(settings = this.getCurrentSettings()): EngineReadinessMap {
+    const secrets = this.getEffectiveSecrets()
+
     return {
       llm: {
         provider: settings.llm.provider,
@@ -41,8 +47,8 @@ export class EngineService {
           settings.llm.provider === 'fake' ||
           Boolean(
             settings.llm.provider === 'openai'
-              ? config.secrets.openaiApiKey
-              : config.secrets.anthropicApiKey
+              ? secrets.openaiApiKey
+              : secrets.anthropicApiKey
           ),
         missingSecrets:
           settings.llm.provider === 'fake'
@@ -51,7 +57,9 @@ export class EngineService {
                 settings.llm.provider === 'openai'
                   ? 'COMFLOW_OPENAI_API_KEY'
                   : 'COMFLOW_ANTHROPIC_API_KEY',
-              ].filter(() => !this.hasSecretForLlm(settings.llm.provider)),
+              ].filter(() =>
+                !this.hasSecretForLlm(settings.llm.provider, secrets)
+              ),
       },
       stt: {
         provider: settings.stt.provider,
@@ -60,8 +68,8 @@ export class EngineService {
           settings.stt.provider === 'fake' ||
           Boolean(
             settings.stt.provider === 'openai'
-              ? config.secrets.openaiApiKey
-              : config.secrets.elevenLabsApiKey
+              ? secrets.openaiApiKey
+              : secrets.elevenLabsApiKey
           ),
         missingSecrets:
           settings.stt.provider === 'fake'
@@ -70,7 +78,9 @@ export class EngineService {
                 settings.stt.provider === 'openai'
                   ? 'COMFLOW_OPENAI_API_KEY'
                   : 'COMFLOW_ELEVENLABS_API_KEY',
-              ].filter(() => !this.hasSecretForStt(settings.stt.provider)),
+              ].filter(() =>
+                !this.hasSecretForStt(settings.stt.provider, secrets)
+              ),
       },
       tts: {
         provider: settings.tts.provider,
@@ -80,8 +90,8 @@ export class EngineService {
           settings.tts.provider === 'fake' ||
           Boolean(
             settings.tts.provider === 'openai'
-              ? config.secrets.openaiApiKey
-              : config.secrets.elevenLabsApiKey
+              ? secrets.openaiApiKey
+              : secrets.elevenLabsApiKey
           ),
         missingSecrets:
           settings.tts.provider === 'fake'
@@ -90,7 +100,9 @@ export class EngineService {
                 settings.tts.provider === 'openai'
                   ? 'COMFLOW_OPENAI_API_KEY'
                   : 'COMFLOW_ELEVENLABS_API_KEY',
-              ].filter(() => !this.hasSecretForTts(settings.tts.provider)),
+              ].filter(() =>
+                !this.hasSecretForTts(settings.tts.provider, secrets)
+              ),
       },
     }
   }
@@ -100,11 +112,15 @@ export class EngineService {
     return {
       settings,
       readiness: this.getReadiness(settings),
+      secrets: this.getSecretStatuses(),
     }
   }
 
-  updateSettings(input: UpdateEngineSettingsInput): GetEngineSettingsResponse {
-    const settings = UpdateEngineSettingsInputSchema.parse(input)
+  updateSettings(input: UpdateEngineSettingsRequest): GetEngineSettingsResponse {
+    const { settings, secrets } = UpdateEngineSettingsRequestSchema.parse(input)
+    if (secrets) {
+      engineSecretRepository.applyPatch(secrets)
+    }
     engineSettingsRepository.upsert(settings)
     return this.getSettingsResponse()
   }
@@ -182,24 +198,25 @@ export class EngineService {
 
   private createLanguageModelProvider(): LanguageModelProvider {
     const settings = this.getCurrentSettings().llm
+    const secrets = this.getEffectiveSecrets()
 
     switch (settings.provider) {
       case 'fake':
         return new FakeLanguageModelProvider()
       case 'openai':
-        if (!config.secrets.openaiApiKey) {
+        if (!secrets.openaiApiKey) {
           throw new HttpError(503, 'OpenAI API key is not configured.')
         }
         return new OpenAiLanguageModelProvider(
-          config.secrets.openaiApiKey,
+          secrets.openaiApiKey,
           settings.model!
         )
       case 'anthropic':
-        if (!config.secrets.anthropicApiKey) {
+        if (!secrets.anthropicApiKey) {
           throw new HttpError(503, 'Anthropic API key is not configured.')
         }
         return new AnthropicLanguageModelProvider(
-          config.secrets.anthropicApiKey,
+          secrets.anthropicApiKey,
           settings.model!
         )
     }
@@ -207,24 +224,25 @@ export class EngineService {
 
   private createSpeechToTextProvider(): SpeechToTextProvider {
     const settings = this.getCurrentSettings().stt
+    const secrets = this.getEffectiveSecrets()
 
     switch (settings.provider) {
       case 'fake':
         return new FakeSpeechToTextProvider()
       case 'openai':
-        if (!config.secrets.openaiApiKey) {
+        if (!secrets.openaiApiKey) {
           throw new HttpError(503, 'OpenAI API key is not configured.')
         }
         return new OpenAiSpeechToTextProvider(
-          config.secrets.openaiApiKey,
+          secrets.openaiApiKey,
           settings.model!
         )
       case 'elevenlabs':
-        if (!config.secrets.elevenLabsApiKey) {
+        if (!secrets.elevenLabsApiKey) {
           throw new HttpError(503, 'ElevenLabs API key is not configured.')
         }
         return new ElevenLabsSpeechToTextProvider(
-          config.secrets.elevenLabsApiKey,
+          secrets.elevenLabsApiKey,
           settings.model!
         )
     }
@@ -232,52 +250,108 @@ export class EngineService {
 
   private createTextToSpeechProvider(): TextToSpeechProvider {
     const settings = this.getCurrentSettings().tts
+    const secrets = this.getEffectiveSecrets()
 
     switch (settings.provider) {
       case 'fake':
         return new FakeTextToSpeechProvider()
       case 'openai':
-        if (!config.secrets.openaiApiKey) {
+        if (!secrets.openaiApiKey) {
           throw new HttpError(503, 'OpenAI API key is not configured.')
         }
         return new OpenAiTextToSpeechProvider(
-          config.secrets.openaiApiKey,
+          secrets.openaiApiKey,
           settings.model!,
           settings.voice!
         )
       case 'elevenlabs':
-        if (!config.secrets.elevenLabsApiKey) {
+        if (!secrets.elevenLabsApiKey) {
           throw new HttpError(503, 'ElevenLabs API key is not configured.')
         }
         return new ElevenLabsTextToSpeechProvider(
-          config.secrets.elevenLabsApiKey,
+          secrets.elevenLabsApiKey,
           settings.model!,
           settings.voice!
         )
     }
   }
 
-  private hasSecretForLlm(provider: EngineSettings['llm']['provider']) {
+  private getEffectiveSecrets(): Record<EngineSecretKey, string> {
+    const stored = engineSecretRepository.getAll()
+    return {
+      openaiApiKey: stored.openaiApiKey ?? config.secrets.openaiApiKey,
+      anthropicApiKey:
+        stored.anthropicApiKey ?? config.secrets.anthropicApiKey,
+      elevenLabsApiKey:
+        stored.elevenLabsApiKey ?? config.secrets.elevenLabsApiKey,
+    }
+  }
+
+  private getSecretStatuses(): EngineSecretStatusMap {
+    const stored = engineSecretRepository.getAll()
+
+    return {
+      openaiApiKey: this.getSecretStatus(
+        'openaiApiKey',
+        stored.openaiApiKey
+      ),
+      anthropicApiKey: this.getSecretStatus(
+        'anthropicApiKey',
+        stored.anthropicApiKey
+      ),
+      elevenLabsApiKey: this.getSecretStatus(
+        'elevenLabsApiKey',
+        stored.elevenLabsApiKey
+      ),
+    }
+  }
+
+  private getSecretStatus(
+    key: EngineSecretKey,
+    storedValue: string | undefined
+  ) {
+    const source: EngineSecretSource = storedValue
+      ? 'stored'
+      : config.secrets[key]
+        ? 'env'
+        : 'missing'
+
+    return {
+      configured: source !== 'missing',
+      source,
+    }
+  }
+
+  private hasSecretForLlm(
+    provider: EngineSettings['llm']['provider'],
+    secrets: Record<EngineSecretKey, string>
+  ) {
     return provider === 'openai'
-      ? Boolean(config.secrets.openaiApiKey)
+      ? Boolean(secrets.openaiApiKey)
       : provider === 'anthropic'
-        ? Boolean(config.secrets.anthropicApiKey)
+        ? Boolean(secrets.anthropicApiKey)
         : true
   }
 
-  private hasSecretForStt(provider: EngineSettings['stt']['provider']) {
+  private hasSecretForStt(
+    provider: EngineSettings['stt']['provider'],
+    secrets: Record<EngineSecretKey, string>
+  ) {
     return provider === 'openai'
-      ? Boolean(config.secrets.openaiApiKey)
+      ? Boolean(secrets.openaiApiKey)
       : provider === 'elevenlabs'
-        ? Boolean(config.secrets.elevenLabsApiKey)
+        ? Boolean(secrets.elevenLabsApiKey)
         : true
   }
 
-  private hasSecretForTts(provider: EngineSettings['tts']['provider']) {
+  private hasSecretForTts(
+    provider: EngineSettings['tts']['provider'],
+    secrets: Record<EngineSecretKey, string>
+  ) {
     return provider === 'openai'
-      ? Boolean(config.secrets.openaiApiKey)
+      ? Boolean(secrets.openaiApiKey)
       : provider === 'elevenlabs'
-        ? Boolean(config.secrets.elevenLabsApiKey)
+        ? Boolean(secrets.elevenLabsApiKey)
         : true
   }
 }

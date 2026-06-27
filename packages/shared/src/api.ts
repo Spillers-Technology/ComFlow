@@ -7,6 +7,7 @@ import {
 import {
   EngineKindSchema,
   EngineReadinessMapSchema,
+  EngineSecretStatusMapSchema,
   EngineSettingsSchema,
   EngineTestResultSchema,
 } from './engine.js'
@@ -36,6 +37,7 @@ export const GetCallResponseSchema = z.object({
   call: CallRecordSchema,
   notes: z.array(CallNoteSchema),
   recordingUrl: z.string().nullable(),
+  recordingDownloadUrl: z.string().nullable(),
 })
 
 export const PatchCallResponseSchema = z.object({
@@ -61,11 +63,13 @@ export const HealthResponseSchema = z.object({
   db: z.literal('ok'),
   settings: EngineSettingsSchema,
   readiness: EngineReadinessMapSchema,
+  secrets: EngineSecretStatusMapSchema,
 })
 
 export const GetEngineSettingsResponseSchema = z.object({
   settings: EngineSettingsSchema,
   readiness: EngineReadinessMapSchema,
+  secrets: EngineSecretStatusMapSchema,
 })
 
 export const UpdateEngineSettingsResponseSchema =

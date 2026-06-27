@@ -16,6 +16,12 @@ type MailboxRow = {
   updated_at: string
 }
 
+type MailboxDefaults = {
+  name: string
+  number: string | null
+  sipAccountRef: string | null
+}
+
 function mapRow(row: MailboxRow): Mailbox {
   return MailboxSchema.parse({
     id: row.id,
@@ -52,17 +58,17 @@ export const mailboxRepository = {
   },
 
   /** Create the default mailbox on first boot so calls always have a home. */
-  ensureDefault(): Mailbox {
+  ensureDefault(defaults: MailboxDefaults): Mailbox {
     const existing = this.getDefault()
     if (existing) return existing
 
     const now = new Date().toISOString()
     const row: MailboxRow = {
       id: randomUUID(),
-      name: 'Main mailbox',
-      number: null,
+      name: defaults.name,
+      number: defaults.number,
       greeting_prompt_id: null,
-      sip_account_ref: null,
+      sip_account_ref: defaults.sipAccountRef,
       created_at: now,
       updated_at: now,
     }

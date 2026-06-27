@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import {
   EngineKindSchema,
-  UpdateEngineSettingsInputSchema,
+  UpdateEngineSettingsRequestSchema,
 } from '../../../shared/src/index.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
 import { EngineService } from '../services/engineService.js'
@@ -19,7 +19,7 @@ export function createSettingsRouter(engineService: EngineService) {
   router.patch(
     '/engines',
     asyncHandler((request, response) => {
-      const input = parseBody(UpdateEngineSettingsInputSchema, request.body)
+      const input = parseBody(UpdateEngineSettingsRequestSchema, request.body)
       response.json(engineService.updateSettings(input))
     })
   )

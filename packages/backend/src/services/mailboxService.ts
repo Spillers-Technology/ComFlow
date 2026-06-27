@@ -1,4 +1,5 @@
 import { Mailbox, UpdateMailboxRequest } from '../../../shared/src/index.js'
+import { config } from '../config.js'
 import { HttpError } from '../lib/errors.js'
 import { mailboxRepository } from '../repositories/mailboxRepository.js'
 
@@ -13,7 +14,7 @@ export class MailboxService {
   }
 
   getDefault(): Mailbox {
-    return mailboxRepository.ensureDefault()
+    return mailboxRepository.ensureDefault(config.defaultMailbox)
   }
 
   update(id: string, patch: UpdateMailboxRequest): Mailbox {

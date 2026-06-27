@@ -143,7 +143,10 @@ export function CallDetailPage() {
             <Grid container spacing={3}>
               <Grid size={{ xs: 12, md: 7 }}>
                 <Stack spacing={3}>
-                  <RecordingPlayer recordingUrl={detail.recordingUrl} />
+                  <RecordingPlayer
+                    recordingUrl={detail.recordingUrl}
+                    recordingDownloadUrl={detail.recordingDownloadUrl}
+                  />
                   <TranscriptPanel transcript={detail.call.transcript} />
                   <NotesPanel notes={detail.notes} onAddNote={handleAddNote} />
                 </Stack>

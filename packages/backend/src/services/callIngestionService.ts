@@ -9,6 +9,7 @@ import { createSilentWav } from '../lib/audio.js'
 import { HttpError } from '../lib/errors.js'
 import { callRepository } from '../repositories/callRepository.js'
 import { mailboxRepository } from '../repositories/mailboxRepository.js'
+import { EmailNotificationService } from './emailNotificationService.js'
 import { EngineService } from './engineService.js'
 
 function extensionForMimeType(mimeType: string): string {
@@ -20,7 +21,8 @@ function extensionForMimeType(mimeType: string): string {
 
 export class CallIngestionService {
   constructor(
-    private readonly engineService: EngineService
+    private readonly engineService: EngineService,
+    private readonly emailNotificationService: EmailNotificationService
   ) {}
 
   async createInboundCall(input: InboundTelephonyWebhookInput) {
@@ -30,7 +32,7 @@ export class CallIngestionService {
       callbackNumber: input.fromNumber,
       transcript: input.transcript,
       // Single-mailbox model today; every call lands in the default mailbox.
-      mailboxId: mailboxRepository.ensureDefault().id,
+      mailboxId: mailboxRepository.ensureDefault(config.defaultMailbox).id,
     })
 
     if (input.transcript) {
@@ -38,7 +40,7 @@ export class CallIngestionService {
         input.transcript
       )
 
-      return callRepository.applyProcessing(call.id, {
+      const processed = callRepository.applyProcessing(call.id, {
         transcript: input.transcript,
         rawTranscript: JSON.stringify({ source: 'inbound-payload' }),
         extracted,
@@ -46,6 +48,9 @@ export class CallIngestionService {
         recordingPath: call.recordingPath,
         recordingMimeType: call.recordingMimeType,
       })
+
+      void this.notifyProcessedVoicemail(processed)
+      return processed
     }
 
     return call
@@ -92,7 +97,7 @@ export class CallIngestionService {
       transcription.transcript
     )
 
-    return callRepository.applyProcessing(call.id, {
+    const processed = callRepository.applyProcessing(call.id, {
       transcript: transcription.transcript,
       rawTranscript: transcription.rawTranscript
         ? JSON.stringify(transcription.rawTranscript)
@@ -102,5 +107,30 @@ export class CallIngestionService {
       recordingPath: relativePath,
       recordingMimeType: input.mimeType,
     })
+
+    void this.notifyProcessedVoicemail(processed)
+    return processed
+  }
+
+  private async notifyProcessedVoicemail(call: {
+    id: string
+    recordingPath: string | null
+  }) {
+    if (callRepository.wasEmailNotified(call.id)) return
+
+    try {
+      const fullCall = callRepository.getById(call.id)
+      if (!fullCall) return
+
+      const sent =
+        await this.emailNotificationService.sendVoicemailProcessed(fullCall)
+      if (sent) {
+        callRepository.markEmailNotified(call.id)
+      }
+    } catch (error) {
+      console.error(
+        `Failed to send voicemail notification for ${call.id}: ${(error as Error).message}`
+      )
+    }
   }
 }

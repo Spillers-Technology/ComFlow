@@ -17,7 +17,7 @@ import {
   MeResponseSchema,
   PatchCallResponseSchema,
   CallUpdateInput,
-  UpdateEngineSettingsInput,
+  UpdateEngineSettingsRequest,
   UpdateEngineSettingsResponseSchema,
   UpdateMailboxRequest,
   UpdateMailboxResponseSchema,
@@ -102,7 +102,7 @@ export function getEngineSettings() {
   )
 }
 
-export function updateEngineSettings(payload: UpdateEngineSettingsInput) {
+export function updateEngineSettings(payload: UpdateEngineSettingsRequest) {
   return request(
     '/api/settings/engines',
     {
@@ -179,6 +179,48 @@ export async function deletePrompt(id: string) {
   if (!response.ok && response.status !== 204) {
     throw new Error('Failed to delete prompt.')
   }
+}
+
+function filenameFromDisposition(disposition: string | null) {
+  if (!disposition) return null
+
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1]
+  if (encoded) {
+    return decodeURIComponent(encoded)
+  }
+
+  const plain = /filename="?([^";]+)"?/i.exec(disposition)?.[1]
+  return plain ?? null
+}
+
+export async function downloadRecording(url: string) {
+  const token = getToken()
+  const response = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+
+  if (!response.ok) {
+    let message = 'Failed to download recording.'
+    try {
+      const json = (await response.json()) as { error?: string }
+      message = json.error ?? message
+    } catch {
+      // Non-JSON media/error responses fall back to the generic message.
+    }
+    throw new Error(message)
+  }
+
+  const blob = await response.blob()
+  const objectUrl = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = objectUrl
+  anchor.download =
+    filenameFromDisposition(response.headers.get('Content-Disposition')) ??
+    'comflow-voicemail.wav'
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(objectUrl)
 }
 
 export function getMe() {

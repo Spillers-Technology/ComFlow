@@ -14,9 +14,15 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import DeleteIcon from '@mui/icons-material/Delete'
+import RefreshIcon from '@mui/icons-material/Refresh'
+import SaveIcon from '@mui/icons-material/Save'
 import {
   EngineKind,
   EngineReadinessMap,
+  EngineSecretKey,
+  EngineSecretStatus,
+  EngineSecretStatusMap,
   EngineSettings,
 } from '../../../shared/src/index.js'
 import {
@@ -95,11 +101,77 @@ const EMPTY_READINESS: EngineReadinessMap = {
   },
 }
 
+const EMPTY_SECRET_STATUS: EngineSecretStatusMap = {
+  openaiApiKey: {
+    configured: false,
+    source: 'missing',
+  },
+  anthropicApiKey: {
+    configured: false,
+    source: 'missing',
+  },
+  elevenLabsApiKey: {
+    configured: false,
+    source: 'missing',
+  },
+}
+
+const SECRET_FIELDS = [
+  {
+    key: 'openaiApiKey',
+    label: 'OpenAI API key',
+    envName: 'COMFLOW_OPENAI_API_KEY',
+  },
+  {
+    key: 'anthropicApiKey',
+    label: 'Anthropic API key',
+    envName: 'COMFLOW_ANTHROPIC_API_KEY',
+  },
+  {
+    key: 'elevenLabsApiKey',
+    label: 'ElevenLabs API key',
+    envName: 'COMFLOW_ELEVENLABS_API_KEY',
+  },
+] as const satisfies readonly {
+  key: EngineSecretKey
+  label: string
+  envName: string
+}[]
+
+type SecretInputState = Record<EngineSecretKey, string>
+
+function emptySecretInputs(): SecretInputState {
+  return {
+    openaiApiKey: '',
+    anthropicApiKey: '',
+    elevenLabsApiKey: '',
+  }
+}
+
+function getSecretPatch(inputs: SecretInputState) {
+  const patch: Partial<Record<EngineSecretKey, string>> = {}
+  for (const field of SECRET_FIELDS) {
+    const value = inputs[field.key].trim()
+    if (value) {
+      patch[field.key] = value
+    }
+  }
+
+  return Object.keys(patch).length > 0 ? patch : undefined
+}
+
 export function SettingsPage() {
   const [settings, setSettings] = useState<EngineSettings>(EMPTY_SETTINGS)
   const [readiness, setReadiness] = useState<EngineReadinessMap>(EMPTY_READINESS)
+  const [secrets, setSecrets] =
+    useState<EngineSecretStatusMap>(EMPTY_SECRET_STATUS)
+  const [secretInputs, setSecretInputs] =
+    useState<SecretInputState>(emptySecretInputs)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [clearingSecret, setClearingSecret] = useState<EngineSecretKey | null>(
+    null
+  )
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [testResults, setTestResults] = useState<Record<string, string>>({})
@@ -115,6 +187,7 @@ export function SettingsPage() {
       const result = await getEngineSettings()
       setSettings(result.settings)
       setReadiness(result.readiness)
+      setSecrets(result.secrets)
       setError(null)
     } catch (reason) {
       setError((reason as Error).message)
@@ -129,14 +202,46 @@ export function SettingsPage() {
     setError(null)
 
     try {
-      const result = await updateEngineSettings(settings)
+      const secretPatch = getSecretPatch(secretInputs)
+      const result = await updateEngineSettings({
+        settings,
+        ...(secretPatch ? { secrets: secretPatch } : {}),
+      })
       setSettings(result.settings)
       setReadiness(result.readiness)
+      setSecrets(result.secrets)
+      if (secretPatch) {
+        setSecretInputs(emptySecretInputs())
+      }
       setNotice('Engine settings saved.')
     } catch (reason) {
       setError((reason as Error).message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleClearSecret(key: EngineSecretKey) {
+    const secretPatch: Partial<Record<EngineSecretKey, null>> = { [key]: null }
+
+    setClearingSecret(key)
+    setNotice(null)
+    setError(null)
+
+    try {
+      const result = await updateEngineSettings({
+        settings,
+        secrets: secretPatch,
+      })
+      setSettings(result.settings)
+      setReadiness(result.readiness)
+      setSecrets(result.secrets)
+      setSecretInputs(current => ({ ...current, [key]: '' }))
+      setNotice('Saved secret override cleared.')
+    } catch (reason) {
+      setError((reason as Error).message)
+    } finally {
+      setClearingSecret(null)
     }
   }
 
@@ -167,8 +272,8 @@ export function SettingsPage() {
         <Box>
           <Typography variant="h3">Engine settings</Typography>
           <Typography color="text.secondary">
-            Provider choice is persisted in SQLite. API keys stay in env vars
-            and surface here only as readiness.
+            Env defaults are used on first run. Saved admin values take over
+            after that.
           </Typography>
         </Box>
 
@@ -311,16 +416,112 @@ export function SettingsPage() {
           </CardContent>
         </Card>
 
+        <Card>
+          <CardHeader
+            title="API keys"
+            subheader="Keys entered here are saved as write-only overrides."
+          />
+          <CardContent>
+            <Stack spacing={2}>
+              {SECRET_FIELDS.map(field => (
+                <SecretEditor
+                  key={field.key}
+                  field={field}
+                  status={secrets[field.key]}
+                  value={secretInputs[field.key]}
+                  disabled={loading || saving || Boolean(clearingSecret)}
+                  clearing={clearingSecret === field.key}
+                  onChange={value =>
+                    setSecretInputs(current => ({
+                      ...current,
+                      [field.key]: value,
+                    }))
+                  }
+                  onClear={() => {
+                    void handleClearSecret(field.key)
+                  }}
+                />
+              ))}
+            </Stack>
+          </CardContent>
+        </Card>
+
         <Stack direction="row" spacing={2}>
-          <Button variant="contained" onClick={handleSave} disabled={loading || saving}>
+          <Button
+            variant="contained"
+            startIcon={<SaveIcon />}
+            onClick={handleSave}
+            disabled={loading || saving || Boolean(clearingSecret)}
+          >
             {saving ? 'Saving...' : 'Save settings'}
           </Button>
-          <Button variant="outlined" onClick={() => void load()} disabled={loading || saving}>
+          <Button
+            variant="outlined"
+            startIcon={<RefreshIcon />}
+            onClick={() => void load()}
+            disabled={loading || saving || Boolean(clearingSecret)}
+          >
             Reload
           </Button>
         </Stack>
       </Stack>
     </Container>
+  )
+}
+
+function SecretEditor(props: {
+  field: (typeof SECRET_FIELDS)[number]
+  status: EngineSecretStatus
+  value: string
+  disabled: boolean
+  clearing: boolean
+  onChange: (value: string) => void
+  onClear: () => void
+}) {
+  const sourceLabel =
+    props.status.source === 'env'
+      ? 'Env'
+      : props.status.source === 'stored'
+        ? 'Saved'
+        : 'Missing'
+  const sourceColor = props.status.configured ? 'success' : 'warning'
+
+  return (
+    <Stack
+      direction={{ xs: 'column', md: 'row' }}
+      spacing={2}
+      alignItems={{ md: 'center' }}
+    >
+      <TextField
+        label={props.field.label}
+        type="password"
+        autoComplete="off"
+        value={props.value}
+        onChange={event => props.onChange(event.target.value)}
+        placeholder={props.field.envName}
+        helperText="Leave blank to keep current value."
+        disabled={props.disabled}
+        fullWidth
+      />
+      <Chip
+        label={sourceLabel}
+        color={sourceColor}
+        variant="outlined"
+        sx={{ minWidth: 96 }}
+      />
+      {props.status.source === 'stored' && (
+        <Button
+          variant="outlined"
+          color="warning"
+          startIcon={<DeleteIcon />}
+          onClick={props.onClear}
+          disabled={props.disabled}
+          sx={{ minWidth: 180 }}
+        >
+          {props.clearing ? 'Clearing...' : 'Clear saved'}
+        </Button>
+      )}
+    </Stack>
   )
 }
 

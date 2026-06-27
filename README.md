@@ -102,12 +102,18 @@ Guarded (pass-through in open mode): `/api/calls*`, `/api/scheduled-calls*`,
 All env vars are documented in [.env.example](.env.example). Highlights:
 
 - **Engines**: `COMFLOW_{OPENAI,ANTHROPIC,ELEVENLABS}_API_KEY`,
-  `COMFLOW_DEFAULT_{LLM,STT,TTS}_*`. Provider selections persist in SQLite;
-  secrets stay in env. `GET /api/health` reports readiness + missing secrets.
+  `COMFLOW_DEFAULT_{LLM,STT,TTS}_*`. The backend loads `.env` automatically
+  for local runs; Docker/Kubernetes-provided env still wins. Provider
+  selections and admin-entered API-key overrides persist in SQLite.
+- **Mailbox**: `COMFLOW_DEFAULT_MAILBOX_{NAME,NUMBER,SIP_ACCOUNT_REF}` seeds
+  the first mailbox; later edits from the Connections admin page persist.
 - **Telephony**: `COMFLOW_TELEPHONY` (`fake`|`baresip`), `BARESIP_CTRL_*`,
   `COMFLOW_GREETING_PATH`, `COMFLOW_SIP_OUTBOUND_DOMAIN`, outbound timing.
 - **AnchorDesk**: `ANCHORDESK_SYNC_ENABLED`, `ANCHORDESK_BASE_URL`,
   `ANCHORDESK_API_TOKEN`.
+- **Email notifications**: `COMFLOW_EMAIL_NOTIFICATIONS_ENABLED`,
+  `COMFLOW_SMTP_*`, `COMFLOW_NOTIFICATION_EMAIL_{FROM,TO}`. Defaults are
+  local-Postfix friendly (`127.0.0.1:25`, no auth/TLS unless configured).
 - **Auth**: `COMFLOW_AUTH_REQUIRED` (default `false`), session secret/TTL,
   `COMFLOW_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD}`.
 

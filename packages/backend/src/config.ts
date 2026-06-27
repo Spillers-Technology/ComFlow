@@ -5,7 +5,9 @@ import {
   SttProviderSchema,
   TtsProviderSchema,
 } from '../../shared/src/index.js'
+import { loadEnvFile } from './lib/envFile.js'
 
+const envFilePath = loadEnvFile()
 const packageRoot = process.cwd()
 // COMFLOW_DATA_DIR lets the backend and the baresip SIP edge share one volume
 // at an identical path, so recording/greeting/outbound paths resolve the same
@@ -28,6 +30,15 @@ function readOptionalEnv(name: string) {
   return value ? value : null
 }
 
+function readCsvEnv(name: string) {
+  return (
+    process.env[name]
+      ?.split(',')
+      .map(value => value.trim())
+      .filter(Boolean) ?? []
+  )
+}
+
 function readProviderDefault<T extends string>(
   value: string | undefined,
   schema: { safeParse: (input: unknown) => { success: boolean; data?: T } }
@@ -37,6 +48,7 @@ function readProviderDefault<T extends string>(
 }
 
 export const config = {
+  envFilePath,
   port: Number(process.env.PORT ?? 3001),
   packageRoot,
   dataDir,
@@ -90,6 +102,25 @@ export const config = {
     baseUrl: readOptionalEnv('ANCHORDESK_BASE_URL'),
     apiToken: readEnv('ANCHORDESK_API_TOKEN'),
   },
+  email: {
+    notificationsEnabled:
+      process.env.COMFLOW_EMAIL_NOTIFICATIONS_ENABLED === 'true',
+    smtpHost: readOptionalEnv('COMFLOW_SMTP_HOST') ?? '127.0.0.1',
+    smtpPort: Number(process.env.COMFLOW_SMTP_PORT ?? 25),
+    smtpSecure: process.env.COMFLOW_SMTP_SECURE === 'true',
+    smtpUser: readOptionalEnv('COMFLOW_SMTP_USER'),
+    smtpPassword: readOptionalEnv('COMFLOW_SMTP_PASSWORD'),
+    from:
+      readOptionalEnv('COMFLOW_NOTIFICATION_EMAIL_FROM') ??
+      'ComFlow <comflow@localhost>',
+    to: readCsvEnv('COMFLOW_NOTIFICATION_EMAIL_TO'),
+    publicUrl:
+      readOptionalEnv('COMFLOW_PUBLIC_URL') ??
+      process.env.FRONTEND_ORIGIN ??
+      'http://localhost:5173',
+    attachRecording:
+      process.env.COMFLOW_NOTIFICATION_ATTACH_RECORDING === 'true',
+  },
   auth: {
     // Local accounts are first-class. When false (default), the API is open and
     // a default admin identity is assumed — keeps dev/tests friction-free. Set
@@ -100,6 +131,11 @@ export const config = {
     bootstrapAdminEmail: readOptionalEnv('COMFLOW_BOOTSTRAP_ADMIN_EMAIL'),
     bootstrapAdminPassword: readOptionalEnv('COMFLOW_BOOTSTRAP_ADMIN_PASSWORD'),
     sessionTtlHours: Number(process.env.COMFLOW_AUTH_SESSION_TTL_HOURS ?? 720),
+  },
+  defaultMailbox: {
+    name: readOptionalEnv('COMFLOW_DEFAULT_MAILBOX_NAME') ?? 'Main mailbox',
+    number: readOptionalEnv('COMFLOW_DEFAULT_MAILBOX_NUMBER'),
+    sipAccountRef: readOptionalEnv('COMFLOW_DEFAULT_MAILBOX_SIP_ACCOUNT_REF'),
   },
   defaultEngineSettings: EngineSettingsSchema.parse({
     llm: {

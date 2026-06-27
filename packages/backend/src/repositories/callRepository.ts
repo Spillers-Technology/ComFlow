@@ -35,6 +35,7 @@ type CallRow = {
   synced_ticket_id: string | null
   synced_ticket_provider: string | null
   synced_at: string | null
+  email_notified_at: string | null
   mailbox_id: string | null
   created_at: string
   updated_at: string
@@ -134,6 +135,7 @@ export const callRepository = {
       synced_ticket_id: null,
       synced_ticket_provider: null,
       synced_at: null,
+      email_notified_at: null,
       mailbox_id: input.mailboxId ?? null,
       created_at: now,
       updated_at: now,
@@ -322,5 +324,18 @@ export const callRepository = {
     )
 
     return this.getById(id)
+  },
+
+  wasEmailNotified(id: string): boolean {
+    const row = db
+      .prepare('SELECT email_notified_at FROM calls WHERE id = ?')
+      .get(id) as { email_notified_at: string | null } | undefined
+    return Boolean(row?.email_notified_at)
+  },
+
+  markEmailNotified(id: string): void {
+    db.prepare(
+      'UPDATE calls SET email_notified_at = ?, updated_at = ? WHERE id = ?'
+    ).run(new Date().toISOString(), new Date().toISOString(), id)
   },
 }

@@ -18,6 +18,7 @@ import { AudioPromptService } from './services/audioPromptService.js'
 import { AuthService } from './services/authService.js'
 import { CallIngestionService } from './services/callIngestionService.js'
 import { CallReviewService } from './services/callReviewService.js'
+import { EmailNotificationService } from './services/emailNotificationService.js'
 import { EngineService } from './services/engineService.js'
 import { MailboxService } from './services/mailboxService.js'
 import { ScheduledCallService } from './services/scheduledCallService.js'
@@ -27,7 +28,11 @@ export function createApp() {
   const app = express()
   const telephonyProvider = new FakeTelephonyProvider()
   const engineService = new EngineService()
-  const callIngestionService = new CallIngestionService(engineService)
+  const emailNotificationService = new EmailNotificationService()
+  const callIngestionService = new CallIngestionService(
+    engineService,
+    emailNotificationService
+  )
   const callReviewService = new CallReviewService()
   const authService = new AuthService()
   const mailboxService = new MailboxService()

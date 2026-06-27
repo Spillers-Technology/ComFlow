@@ -1138,7 +1138,7 @@
       <div class="roadmap-label-block">
         <div class="section-label">Roadmap</div>
         <div class="roadmap-big"><span class="glow-text">Where we're</span><br>going.</div>
-        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">M1 ships the whole voicemail loop today. M2 adds SSO; M3 opens it up to many mailboxes and teams. Each layer builds on the last — and stays in its lane.</p>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">M1 ships the whole voicemail loop today. M2 adds self-serve signup, billing, and SSO; M3 opens it up to many mailboxes and teams. Each layer builds on the last — and stays in its lane.</p>
       </div>
 
       <ul class="roadmap-list">
@@ -1163,6 +1163,14 @@
           <div class="roadmap-text">
             Golden review inbox
             <small>Triage, search, transcript, playback, notes, "new" emphasis</small>
+          </div>
+          <span class="status-badge status-done">Done</span>
+        </li>
+        <li class="roadmap-item">
+          <span class="roadmap-icon">⬇️</span>
+          <div class="roadmap-text">
+            Voicemail downloads
+            <small>Download original recordings from the call detail view</small>
           </div>
           <span class="status-badge status-done">Done</span>
         </li>
@@ -1199,6 +1207,22 @@
           <span class="status-badge status-done">Done</span>
         </li>
         <li class="roadmap-item">
+          <span class="roadmap-icon">✉️</span>
+          <div class="roadmap-text">
+            SMTP voicemail notifications
+            <small>Postfix-friendly email alerts when new voicemails are processed</small>
+          </div>
+          <span class="status-badge status-done">Done</span>
+        </li>
+        <li class="roadmap-item">
+          <span class="roadmap-icon">💳</span>
+          <div class="roadmap-text">
+            Self-serve signup &amp; billing <small>M2</small>
+            <small>Hosted registration, payment confirmation, and automatic local account creation</small>
+          </div>
+          <span class="status-badge status-planned">Planned</span>
+        </li>
+        <li class="roadmap-item">
           <span class="roadmap-icon">🪪</span>
           <div class="roadmap-text">
             SSO — OIDC / SAML 2.0 <small>M2</small>
@@ -1225,10 +1249,10 @@
     <div class="callout-card">
       <div class="callout-phone">📨</div>
       <div class="callout-text">
-        <h3>Want in? <span class="glow-text">Just ask.</span></h3>
-        <p>ComFlow is hosted at <strong>com.spillerstech.us</strong>. Accounts are created by hand — the way it should be. Email <a href="mailto:support@spillerstech.us?subject=ComFlow%20access&amp;body=Hi%2C%20I%27d%20like%20a%20ComFlow%20account.%0A%0AName%3A%0ACallback%20number%3A%0AWhat%20I%27m%20using%20it%20for%3A" style="color: var(--accent-2); text-decoration: underline;">support@spillerstech.us</a> with a <strong>callback number</strong> and a line about what you're doing, and we'll set you up a local account and get you going — usually same day.</p>
+        <h3>Want in? <span class="glow-text">Pre-register.</span></h3>
+        <p>ComFlow is hosted at <strong>com.spillerstech.us</strong>. Self-serve signup and billing are on the way; for now, send the registration template to <a href="mailto:support@spillerstech.us?subject=ComFlow%20registration%20request&amp;body=COMFLOW_ACCESS_REQUEST%0A%0AName%3A%0AAccount%20email%3A%0AOrganization%3A%0ACallback%20number%3A%0ABilling%20contact%20email%3A%0AUse%20case%3A%0APreferred%20start%20date%3A%0A%0ANotes%3A" style="color: var(--accent-2); text-decoration: underline;">support@spillerstech.us</a>. We use it to create the hosted account manually for now, and that same structured request is ready to become the automated account-creation trigger later.</p>
       </div>
-      <a href="mailto:support@spillerstech.us?subject=ComFlow%20access&amp;body=Hi%2C%20I%27d%20like%20a%20ComFlow%20account.%0A%0AName%3A%0ACallback%20number%3A%0AWhat%20I%27m%20using%20it%20for%3A" class="btn btn-primary" style="white-space:nowrap; align-self: center;">Email for an account →</a>
+      <a href="mailto:support@spillerstech.us?subject=ComFlow%20registration%20request&amp;body=COMFLOW_ACCESS_REQUEST%0A%0AName%3A%0AAccount%20email%3A%0AOrganization%3A%0ACallback%20number%3A%0ABilling%20contact%20email%3A%0AUse%20case%3A%0APreferred%20start%20date%3A%0A%0ANotes%3A" class="btn btn-primary" style="white-space:nowrap; align-self: center;">Send signup request →</a>
     </div>
     <p style="text-align:center; color: var(--text-muted); font-size: 0.85rem; margin-top: 24px; line-height: 1.7;">
       Rather run your own? It's open source and ships as a single container:

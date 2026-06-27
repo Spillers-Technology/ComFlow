@@ -34,6 +34,7 @@ db.exec(`
     synced_ticket_id TEXT,
     synced_ticket_provider TEXT,
     synced_at TEXT,
+    email_notified_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -56,6 +57,12 @@ db.exec(`
     tts_provider TEXT NOT NULL,
     tts_model TEXT,
     tts_voice TEXT,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS engine_secret_overrides (
+    secret_key TEXT PRIMARY KEY,
+    secret_value TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
 
@@ -131,3 +138,4 @@ addColumnIfMissing('calls', 'synced_at', 'TEXT')
 addColumnIfMissing('scheduled_calls', 'message_prompt_id', 'TEXT')
 addColumnIfMissing('scheduled_calls', 'question_prompt_id', 'TEXT')
 addColumnIfMissing('calls', 'mailbox_id', 'TEXT')
+addColumnIfMissing('calls', 'email_notified_at', 'TEXT')
