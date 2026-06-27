@@ -1,0 +1,36 @@
+# Production image: builds shared + backend + frontend, then ships a single
+# container where the Express backend serves the built SPA on $PORT.
+FROM node:20-bookworm-slim AS build
+WORKDIR /app
+
+# Install workspace deps from lockfile (layer cached on manifest changes only).
+COPY package.json package-lock.json ./
+COPY packages/backend/package.json packages/backend/
+COPY packages/frontend/package.json packages/frontend/
+COPY packages/shared/package.json packages/shared/
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+FROM node:20-bookworm-slim
+WORKDIR /app
+ENV NODE_ENV=production \
+    PORT=3001 \
+    COMFLOW_DATA_DIR=/data \
+    COMFLOW_STATIC_DIR=/app/packages/frontend/dist \
+    COMFLOW_SEED_DEMO=false
+
+# Runtime needs the installed modules, the compiled backend (which bundles the
+# compiled shared package under dist/shared), and the built static frontend.
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/packages/backend/package.json ./packages/backend/package.json
+COPY --from=build /app/packages/backend/dist ./packages/backend/dist
+COPY --from=build /app/packages/frontend/dist ./packages/frontend/dist
+
+VOLUME ["/data"]
+EXPOSE 3001
+
+WORKDIR /app/packages/backend
+CMD ["node", "dist/backend/src/server.js"]

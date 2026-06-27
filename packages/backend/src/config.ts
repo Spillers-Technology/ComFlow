@@ -47,6 +47,9 @@ export const config = {
   promptsDir: path.join(dataDir, 'prompts'),
   databasePath: path.join(dataDir, 'comflow.db'),
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
+  // When set (the production image sets it), the backend also serves the built
+  // frontend from this directory, so one container is the whole app on PORT.
+  staticDir: readOptionalEnv('COMFLOW_STATIC_DIR'),
   seedDemo: process.env.COMFLOW_SEED_DEMO !== 'false',
   telephony: {
     // 'baresip' drives a real SIP UA (the SIP edge) over its ctrl_tcp interface.
