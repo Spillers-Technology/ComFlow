@@ -17,9 +17,18 @@ packages/backend/data/*.db
 !*.example
 packages/backend/data/recordings/*
 !packages/backend/data/recordings/.gitkeep
+packages/backend/data/recordings-raw/*
+!packages/backend/data/recordings-raw/.gitkeep
+packages/backend/data/outbound/*
+!packages/backend/data/outbound/.gitkeep
+packages/backend/data/greetings/*
+!packages/backend/data/greetings/.gitkeep
 packages/backend/data/callbacks/*
 !packages/backend/data/callbacks/.gitkeep
 packages/*/dist
+
+# baresip SIP edge — never commit real registration credentials.
+infra/baresip/accounts
 
 # Editor directories and files
 .vscode/*

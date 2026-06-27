@@ -8,6 +8,7 @@ import { config } from '../config.js'
 import { createSilentWav } from '../lib/audio.js'
 import { HttpError } from '../lib/errors.js'
 import { callRepository } from '../repositories/callRepository.js'
+import { mailboxRepository } from '../repositories/mailboxRepository.js'
 import { EngineService } from './engineService.js'
 
 function extensionForMimeType(mimeType: string): string {
@@ -28,6 +29,8 @@ export class CallIngestionService {
       source: input.source,
       callbackNumber: input.fromNumber,
       transcript: input.transcript,
+      // Single-mailbox model today; every call lands in the default mailbox.
+      mailboxId: mailboxRepository.ensureDefault().id,
     })
 
     if (input.transcript) {

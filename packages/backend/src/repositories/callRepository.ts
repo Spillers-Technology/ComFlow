@@ -32,6 +32,10 @@ type CallRow = {
   recording_path: string | null
   recording_mime_type: string | null
   reviewed_at: string | null
+  synced_ticket_id: string | null
+  synced_ticket_provider: string | null
+  synced_at: string | null
+  mailbox_id: string | null
   created_at: string
   updated_at: string
 }
@@ -48,6 +52,7 @@ export type CreateCallInput = {
   source: CallSource
   callbackNumber: string | null
   transcript?: string
+  mailboxId?: string | null
 }
 
 function mapCall(row: CallRow): CallRecord {
@@ -70,6 +75,10 @@ function mapCall(row: CallRow): CallRecord {
     telephonyCallId: row.telephony_call_id,
     rawTranscript: row.raw_transcript,
     reviewedAt: row.reviewed_at,
+    syncedTicketId: row.synced_ticket_id,
+    syncedTicketProvider: row.synced_ticket_provider,
+    syncedAt: row.synced_at,
+    mailboxId: row.mailbox_id,
     source: row.source,
   })
 }
@@ -122,6 +131,10 @@ export const callRepository = {
       recording_path: null,
       recording_mime_type: null,
       reviewed_at: null,
+      synced_ticket_id: null,
+      synced_ticket_provider: null,
+      synced_at: null,
+      mailbox_id: input.mailboxId ?? null,
       created_at: now,
       updated_at: now,
     }
@@ -131,13 +144,15 @@ export const callRepository = {
         id, telephony_call_id, source, caller_name, company, callback_number,
         intent, urgency, summary, transcript, raw_transcript, status,
         assigned_queue, recording_status, recording_path, recording_mime_type,
-        reviewed_at, created_at, updated_at
+        reviewed_at, synced_ticket_id, synced_ticket_provider, synced_at,
+        mailbox_id, created_at, updated_at
       )
       VALUES (
         @id, @telephony_call_id, @source, @caller_name, @company, @callback_number,
         @intent, @urgency, @summary, @transcript, @raw_transcript, @status,
         @assigned_queue, @recording_status, @recording_path, @recording_mime_type,
-        @reviewed_at, @created_at, @updated_at
+        @reviewed_at, @synced_ticket_id, @synced_ticket_provider, @synced_at,
+        @mailbox_id, @created_at, @updated_at
       )
     `).run(row)
 
@@ -280,6 +295,28 @@ export const callRepository = {
       nextStatus,
       input.assignedQueue ?? existing.assignedQueue,
       reviewedAt,
+      new Date().toISOString(),
+      id
+    )
+
+    return this.getById(id)
+  },
+
+  markSynced(
+    id: string,
+    input: { ticketId: string; provider: string }
+  ): CallRecord | null {
+    const existing = this.getById(id)
+    if (!existing) return null
+
+    db.prepare(`
+      UPDATE calls
+      SET synced_ticket_id = ?, synced_ticket_provider = ?, synced_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      input.ticketId,
+      input.provider,
+      new Date().toISOString(),
       new Date().toISOString(),
       id
     )

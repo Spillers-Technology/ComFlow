@@ -1,5 +1,4 @@
 import {
-  CallRecord,
   ExtractedCallFields,
   ExtractedCallFieldsSchema,
 } from '../../../../shared/src/index.js'
@@ -67,10 +66,6 @@ function findCompany(transcript: string): string | null {
   return match?.[1] ?? null
 }
 
-function formatIntent(intent: CallRecord['intent']) {
-  return intent.replace(/_/g, ' ')
-}
-
 export class FakeLanguageModelProvider implements LanguageModelProvider {
   async extractCallMetadata(input: {
     transcript: string
@@ -87,22 +82,5 @@ export class FakeLanguageModelProvider implements LanguageModelProvider {
           ? `${transcript.slice(0, 157)}...`
           : transcript || 'No transcript available.',
     })
-  }
-
-  async generateCallbackScript(input: {
-    call: CallRecord
-    notes: string | null
-  }): Promise<{ script: string }> {
-    const name = input.call.callerName ?? 'there'
-    const reason =
-      input.call.summary ??
-      `your ${formatIntent(input.call.intent)} request with ComFlow`
-    const callbackLine = input.notes
-      ? `Our team noted: ${input.notes.trim()}. `
-      : ''
-
-    return {
-      script: `Hello ${name}, this is ComFlow returning your call. I'm following up about ${reason}. ${callbackLine}Please give us a callback when you're ready and we'll keep helping from there.`,
-    }
   }
 }

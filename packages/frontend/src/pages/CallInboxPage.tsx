@@ -32,18 +32,35 @@ export function CallInboxPage() {
   const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
-    setLoading(true)
-    void getCalls({
-      status: status || undefined,
-      q: query || undefined,
-      intent: intent || undefined,
-    })
-      .then(result => {
-        setItems(result.items)
-        setError(null)
+    let cancelled = false
+
+    function fetchCalls(showSpinner: boolean) {
+      if (showSpinner) setLoading(true)
+      void getCalls({
+        status: status || undefined,
+        q: query || undefined,
+        intent: intent || undefined,
       })
-      .catch((reason: Error) => setError(reason.message))
-      .finally(() => setLoading(false))
+        .then(result => {
+          if (cancelled) return
+          setItems(result.items)
+          setError(null)
+        })
+        .catch((reason: Error) => {
+          if (!cancelled) setError(reason.message)
+        })
+        .finally(() => {
+          if (!cancelled && showSpinner) setLoading(false)
+        })
+    }
+
+    fetchCalls(true)
+    // Light polling so freshly captured voicemails surface without a manual refresh.
+    const timer = setInterval(() => fetchCalls(false), 15_000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
   }, [status, query, intent, refreshKey])
 
   return (

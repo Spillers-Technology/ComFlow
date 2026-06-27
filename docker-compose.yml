@@ -9,6 +9,7 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
+      - comflow-data:/data
     env_file:
       - path: .env
         required: false
@@ -16,6 +17,13 @@ services:
       - PORT=3001
       - FRONTEND_ORIGIN=http://localhost:5173
       - COMFLOW_SEED_DEMO=true
+      # Shared volume so the backend and baresip resolve recording/greeting/
+      # outbound paths identically.
+      - COMFLOW_DATA_DIR=/data
+      # Set to 'baresip' to use the real SIP edge below (default 'fake').
+      - COMFLOW_TELEPHONY=${COMFLOW_TELEPHONY:-fake}
+      - BARESIP_CTRL_HOST=baresip
+      - BARESIP_CTRL_PORT=4444
 
   frontend:
     build:
@@ -32,3 +40,23 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
       - VITE_API_PROXY_TARGET=http://backend:3001
+
+  # SIP edge — a real SIP UA (baresip). Only needed when COMFLOW_TELEPHONY=baresip.
+  # Provide infra/baresip/accounts (copied from accounts.example) with your SIP
+  # source before starting. SIP/RTP need reachable UDP — see infra/baresip/README.md.
+  baresip:
+    build:
+      context: ./infra/baresip
+      dockerfile: Dockerfile
+    profiles:
+      - sip
+    volumes:
+      - ./infra/baresip/config:/etc/baresip/config:ro
+      - ./infra/baresip/accounts:/etc/baresip/accounts:ro
+      - comflow-data:/data
+    ports:
+      - "5060:5060/udp"
+      - "16384-16584:16384-16584/udp"
+
+volumes:
+  comflow-data:

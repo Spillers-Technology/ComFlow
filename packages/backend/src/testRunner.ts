@@ -23,7 +23,6 @@ async function getModules() {
 async function resetDb() {
   const { db } = await getModules()
   db.exec(`
-    DELETE FROM callback_attempts;
     DELETE FROM call_notes;
     DELETE FROM calls;
     DELETE FROM engine_settings;
@@ -184,62 +183,6 @@ async function main() {
       assert.equal(callsBody.items.length, 1)
       assert.equal(callsBody.items[0]?.intent, 'support_request')
       assert.equal(callsBody.items[0]?.urgency, 'high')
-    })
-  })
-
-  await runTest('callback flow stores an attempt and playable audio', async () => {
-    await withServer(async baseUrl => {
-      await requestJson(baseUrl, '/api/settings/engines', {
-        method: 'PATCH',
-        body: JSON.stringify({
-          llm: { provider: 'fake', model: null },
-          stt: { provider: 'fake', model: null },
-          tts: { provider: 'fake', model: null, voice: null },
-        }),
-      })
-
-      const accepted = await requestJson(baseUrl, '/api/webhooks/telephony/inbound', {
-        method: 'POST',
-        body: JSON.stringify({
-          telephonyCallId: 'test-call-002',
-          source: 'fake',
-          fromNumber: '+1 555 300 4000',
-          transcript:
-            'Hello, Marco Ruiz from Northfield Labs here. I have a billing question about our invoice and can be reached at +1 555 300 4000.',
-        }),
-      })
-      const acceptedBody = accepted.body as { callId: string }
-
-      const callId = acceptedBody.callId
-      const callback = await requestJson(baseUrl, `/api/calls/${callId}/callbacks`, {
-        method: 'POST',
-        body: JSON.stringify({
-          notes: 'Confirm the invoice number before discussing payment status.',
-        }),
-      })
-      const callbackBody = callback.body as {
-        attempt: {
-          status: string
-          providerSnapshot: { telephonyProvider: string }
-          audioUrl: string | null
-        }
-      }
-
-      assert.equal(callback.response.status, 201)
-      assert.equal(callbackBody.attempt.status, 'simulated_completed')
-      assert.equal(callbackBody.attempt.providerSnapshot.telephonyProvider, 'fake')
-      assert.ok(callbackBody.attempt.audioUrl)
-
-      const detail = await requestJson(baseUrl, `/api/calls/${callId}`)
-      const detailBody = detail.body as {
-        callbackAttempts: Array<unknown>
-      }
-      assert.equal(detail.response.status, 200)
-      assert.equal(detailBody.callbackAttempts.length, 1)
-
-      const audioResponse = await fetch(`${baseUrl}${callbackBody.attempt.audioUrl}`)
-      assert.equal(audioResponse.status, 200)
-      assert.match(audioResponse.headers.get('content-type') ?? '', /^audio\//)
     })
   })
 

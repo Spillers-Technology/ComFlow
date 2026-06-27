@@ -1,0 +1,44 @@
+# baresip configuration for the ComFlow SIP edge.
+# Minimal config: register an account, auto-answer, record to /data, expose ctrl_tcp.
+
+# --- Core ---
+poll_method             epoll
+
+# --- Audio ---
+audio_player            aufile,/dev/null
+audio_source            ausine,
+audio_alert             aufile,/dev/null
+
+# Auto-answer inbound calls so ComFlow can record the voicemail.
+sip_autoanswer          yes
+call_local_timeout      120
+
+# --- Recording (sndfile auto-records each call to this directory) ---
+# ComFlow reads the resulting WAVs from the shared /data volume.
+record_path             /data/recordings-raw
+record_aufile           yes
+
+# --- RTP media ports (publish/forward these for media to flow) ---
+rtp_ports               16384-16584
+
+# --- Modules ---
+module_path             /usr/local/lib/baresip/modules
+
+# transports / codecs
+module                  stun.so
+module                  ice.so
+module                  g711.so
+module                  opus.so
+
+# audio file playback (greeting / outbound message) + recording
+module                  aufile.so
+module                  ausine.so
+module                  sndfile.so
+
+# account + menu (call control)
+module                  account.so
+module                  menu.so
+
+# Control interface that the ComFlow backend connects to.
+module                  ctrl_tcp.so
+ctrl_tcp_listen         0.0.0.0:4444

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   Alert,
   Button,
+  Chip,
   Container,
   Grid,
   Skeleton,
@@ -17,12 +18,11 @@ import {
 } from '../../../shared/src/index.js'
 import { CallMetadataForm } from '../components/CallMetadataForm'
 import { CallStatusBadge } from '../components/CallStatusBadge'
-import { CallbackPanel } from '../components/CallbackPanel'
 import { NotesPanel } from '../components/NotesPanel'
 import { RecordingPlayer } from '../components/RecordingPlayer'
 import { TranscriptPanel } from '../components/TranscriptPanel'
 import { UrgencyBadge } from '../components/UrgencyBadge'
-import { addCallNote, createCallback, getCall, patchCall } from '../lib/api'
+import { addCallNote, getCall, patchCall } from '../lib/api'
 
 interface SnackbarState {
   open: boolean
@@ -36,7 +36,6 @@ export function CallDetailPage() {
   const [detail, setDetail] = useState<GetCallResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [creatingCallback, setCreatingCallback] = useState(false)
   const [snackbar, setSnackbar] = useState<SnackbarState>({
     open: false,
     message: '',
@@ -102,29 +101,6 @@ export function CallDetailPage() {
     await load()
   }
 
-  async function handleCreateCallback(payload: { notes?: string }) {
-    if (!id) return
-    setCreatingCallback(true)
-    try {
-      await createCallback(id, payload)
-      await load()
-      setSnackbar({
-        open: true,
-        message: 'Callback prepared.',
-        severity: 'success',
-      })
-    } catch (reason) {
-      setSnackbar({
-        open: true,
-        message: (reason as Error).message,
-        severity: 'error',
-      })
-      throw reason
-    } finally {
-      setCreatingCallback(false)
-    }
-  }
-
   function closeSnackbar() {
     setSnackbar(s => ({ ...s, open: false }))
   }
@@ -168,12 +144,6 @@ export function CallDetailPage() {
               <Grid size={{ xs: 12, md: 7 }}>
                 <Stack spacing={3}>
                   <RecordingPlayer recordingUrl={detail.recordingUrl} />
-                  <CallbackPanel
-                    callbackNumber={detail.call.callbackNumber}
-                    attempts={detail.callbackAttempts}
-                    creating={creatingCallback}
-                    onCreate={handleCreateCallback}
-                  />
                   <TranscriptPanel transcript={detail.call.transcript} />
                   <NotesPanel notes={detail.notes} onAddNote={handleAddNote} />
                 </Stack>
@@ -220,12 +190,20 @@ function CallSummaryHeader({ call }: { call: CallRecord }) {
       <Typography color="text.secondary">
         {call.company ?? 'No company'} • {call.callbackNumber ?? 'No callback'}
       </Typography>
-      <Stack direction="row" spacing={1} alignItems="center">
+      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
         <CallStatusBadge status={call.status} />
         <UrgencyBadge urgency={call.urgency} />
         <Typography color="text.secondary">
           {formattedIntent}
         </Typography>
+        {call.syncedTicketId && (
+          <Chip
+            size="small"
+            color="success"
+            variant="outlined"
+            label={`Synced to AnchorDesk #${call.syncedTicketId}`}
+          />
+        )}
       </Stack>
     </Stack>
   )

@@ -1,6 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
 import {
-  CallRecord,
   ExtractedCallFields,
   ExtractedCallFieldsSchema,
 } from '../../../../shared/src/index.js'
@@ -9,10 +8,6 @@ import { LanguageModelProvider } from './types.js'
 const EXTRACTION_SYSTEM_PROMPT = `You analyze voicemail transcripts and return structured metadata.
 Always call the extract_call_metadata tool.
 Be concise, accurate, and write a 2-4 sentence summary for an operator.`
-
-const CALLBACK_SYSTEM_PROMPT = `You write short callback scripts for a support voicemail workflow.
-Return JSON only with a single "script" field.
-The script should sound human, concise, and appropriate for a returned call.`
 
 const EXTRACTION_TOOL: Anthropic.Tool = {
   name: 'extract_call_metadata',
@@ -92,45 +87,5 @@ export class AnthropicLanguageModelProvider implements LanguageModelProvider {
     }
 
     throw new Error('Anthropic did not return structured extraction output.')
-  }
-
-  async generateCallbackScript(input: {
-    call: CallRecord
-    notes: string | null
-  }): Promise<{ script: string }> {
-    const message = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 300,
-      system: CALLBACK_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: JSON.stringify({
-            call: {
-              callerName: input.call.callerName,
-              company: input.call.company,
-              callbackNumber: input.call.callbackNumber,
-              summary: input.call.summary,
-              intent: input.call.intent,
-              urgency: input.call.urgency,
-              transcript: input.call.transcript,
-            },
-            notes: input.notes,
-          }),
-        },
-      ],
-    })
-
-    const text = message.content
-      .filter(block => block.type === 'text')
-      .map(block => block.text)
-      .join('\n')
-
-    const parsed = JSON.parse(text) as { script?: unknown }
-    if (typeof parsed.script !== 'string' || parsed.script.trim().length === 0) {
-      throw new Error('Anthropic did not return a callback script.')
-    }
-
-    return { script: parsed.script.trim() }
   }
 }

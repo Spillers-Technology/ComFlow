@@ -1,0 +1,15 @@
+# baresip account registration for the ComFlow SIP edge.
+# Copy to `accounts` and fill in your SIP source. One line per account.
+#
+# Format:
+#   <sip:USER@DOMAIN>;auth_pass=PASSWORD;<options>
+#
+# Common options:
+#   ;auth_user=USER          explicit auth username if it differs from USER
+#   ;outbound="sip:PROXY"    outbound proxy / SBC
+#   ;answermode=auto         auto-answer (mirrors sip_autoanswer in config)
+#   ;regint=600              re-registration interval (seconds)
+#   ;audio_codecs=opus,pcmu  preferred codecs
+#
+# Example (replace with your real SIP provider / PBX account):
+<sip:1001@pbx.example.com>;auth_pass=CHANGE_ME;answermode=auto;regint=600;audio_codecs=opus,pcmu,pcma

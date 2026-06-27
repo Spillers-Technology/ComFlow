@@ -1,31 +1,26 @@
 import {
+  CallRecord,
+  CallStatus,
   CallUpdateInput,
   CreateCallNoteInput,
 } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
-import { callbackRepository } from '../repositories/callbackRepository.js'
 import { callRepository, CallFilters } from '../repositories/callRepository.js'
 import { noteRepository } from '../repositories/noteRepository.js'
+import { AnchordeskSyncService } from './anchordeskSyncService.js'
 
-function mapCallbackAttemptForApi(
-  attempt: ReturnType<typeof callbackRepository.listByCallId>[number]
-) {
-  return {
-    id: attempt.id,
-    callId: attempt.callId,
-    callbackNumber: attempt.callbackNumber,
-    notes: attempt.notes,
-    script: attempt.script,
-    status: attempt.status,
-    providerSnapshot: attempt.providerSnapshot,
-    audioMimeType: attempt.audioMimeType,
-    audioUrl: attempt.audioPath ? `/api/callbacks/${attempt.id}/audio` : null,
-    createdAt: attempt.createdAt,
-    updatedAt: attempt.updatedAt,
-  }
-}
+// A voicemail is "gilded" (worth syncing to AnchorDesk) once an operator has
+// reviewed or assigned it. New/resolved/spam are intentionally not synced.
+const SYNCABLE_STATUSES: ReadonlySet<CallStatus> = new Set([
+  'reviewed',
+  'assigned',
+])
 
 export class CallReviewService {
+  constructor(
+    private readonly anchordeskSync: AnchordeskSyncService = new AnchordeskSyncService()
+  ) {}
+
   listCalls(filters: CallFilters) {
     return callRepository.list(filters)
   }
@@ -39,17 +34,35 @@ export class CallReviewService {
     return {
       call,
       notes: noteRepository.listByCallId(id),
-      callbackAttempts: callbackRepository.listByCallId(id).map(mapCallbackAttemptForApi),
     }
   }
 
-  updateCall(id: string, input: CallUpdateInput) {
+  async updateCall(id: string, input: CallUpdateInput): Promise<CallRecord> {
     const call = callRepository.update(id, input)
     if (!call) {
       throw new HttpError(404, 'Call not found.')
     }
 
-    return call
+    return (await this.maybeSync(call)) ?? call
+  }
+
+  /** Push to AnchorDesk when a call becomes gilded and isn't already synced. */
+  private async maybeSync(call: CallRecord): Promise<CallRecord | null> {
+    if (call.syncedTicketId) return null
+    if (!SYNCABLE_STATUSES.has(call.status)) return null
+    if (!this.anchordeskSync.isEnabled()) return null
+
+    try {
+      await this.anchordeskSync.syncCall(call)
+      return callRepository.getById(call.id)
+    } catch (error) {
+      // The review itself is persisted; don't fail the request because the
+      // downstream sync hiccuped.
+      console.warn(
+        `AnchorDesk sync failed for call ${call.id}: ${(error as Error).message}`
+      )
+      return null
+    }
   }
 
   addNote(callId: string, input: CreateCallNoteInput) {
