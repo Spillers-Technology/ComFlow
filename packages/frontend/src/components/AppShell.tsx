@@ -7,8 +7,11 @@ import {
   Typography,
 } from '@mui/material'
 import { NavLink } from 'react-router-dom'
+import { useAuth } from '../app/AuthContext'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  const { user, authRequired, logout } = useAuth()
+
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <AppBar position="static" elevation={0} sx={{ borderBottom: 1, borderColor: 'divider' }}>
@@ -16,13 +19,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Typography variant="h6" fontWeight={700} sx={{ letterSpacing: '-0.5px', flexGrow: 1 }}>
             ComFlow
           </Typography>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} alignItems="center">
             <Button color="inherit" component={NavLink} to="/calls">
               Inbox
+            </Button>
+            <Button color="inherit" component={NavLink} to="/scheduled-calls">
+              Scheduled
+            </Button>
+            <Button color="inherit" component={NavLink} to="/connections">
+              Connections
             </Button>
             <Button color="inherit" component={NavLink} to="/settings">
               Settings
             </Button>
+            {authRequired && user && (
+              <Button color="inherit" onClick={logout}>
+                Sign out
+              </Button>
+            )}
           </Stack>
         </Toolbar>
       </AppBar>

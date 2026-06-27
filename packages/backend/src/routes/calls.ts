@@ -3,20 +3,15 @@ import { Router } from 'express'
 import {
   CallIntentSchema,
   CallStatusSchema,
-  CreateCallbackRequestSchema,
   CallUpdateInputSchema,
   CreateCallNoteInputSchema,
 } from '../../../shared/src/index.js'
 import { config } from '../config.js'
 import { HttpError } from '../lib/errors.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
-import { CallbackService } from '../services/callbackService.js'
 import { CallReviewService } from '../services/callReviewService.js'
 
-export function createCallsRouter(
-  callReviewService: CallReviewService,
-  callbackService: CallbackService
-) {
+export function createCallsRouter(callReviewService: CallReviewService) {
   const router = Router()
 
   router.get(
@@ -87,22 +82,6 @@ export function createCallsRouter(
 
   router.patch(
     '/:id',
-    asyncHandler((request, response) => {
-      const id = Array.isArray(request.params.id)
-        ? request.params.id[0]
-        : request.params.id
-      if (!id) {
-        throw new HttpError(400, 'Call id is required.')
-      }
-
-      const input = parseBody(CallUpdateInputSchema, request.body)
-      const call = callReviewService.updateCall(id, input)
-      response.json({ call })
-    })
-  )
-
-  router.post(
-    '/:id/callbacks',
     asyncHandler(async (request, response) => {
       const id = Array.isArray(request.params.id)
         ? request.params.id[0]
@@ -111,9 +90,9 @@ export function createCallsRouter(
         throw new HttpError(400, 'Call id is required.')
       }
 
-      const input = parseBody(CreateCallbackRequestSchema, request.body ?? {})
-      const result = await callbackService.createCallback(id, input)
-      response.status(201).json(result)
+      const input = parseBody(CallUpdateInputSchema, request.body)
+      const call = await callReviewService.updateCall(id, input)
+      response.json({ call })
     })
   )
 

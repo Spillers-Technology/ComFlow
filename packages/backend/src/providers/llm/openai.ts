@@ -1,5 +1,4 @@
 import {
-  CallRecord,
   ExtractedCallFields,
   ExtractedCallFieldsSchema,
 } from '../../../../shared/src/index.js'
@@ -69,55 +68,5 @@ export class OpenAiLanguageModelProvider implements LanguageModelProvider {
     return ExtractedCallFieldsSchema.parse(
       JSON.parse(getMessageContent(json)) as unknown
     )
-  }
-
-  async generateCallbackScript(input: {
-    call: CallRecord
-    notes: string | null
-  }): Promise<{ script: string }> {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: this.model,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content:
-              'Return JSON with one key, "script". Write a brief callback script for returning a voicemail.',
-          },
-          {
-            role: 'user',
-            content: JSON.stringify({
-              call: {
-                callerName: input.call.callerName,
-                company: input.call.company,
-                callbackNumber: input.call.callbackNumber,
-                summary: input.call.summary,
-                intent: input.call.intent,
-                urgency: input.call.urgency,
-                transcript: input.call.transcript,
-              },
-              notes: input.notes,
-            }),
-          },
-        ],
-      }),
-    })
-
-    const json = await parseJsonResponse(response)
-    const parsed = JSON.parse(getMessageContent(json)) as {
-      script?: unknown
-    }
-
-    if (typeof parsed.script !== 'string' || parsed.script.trim().length === 0) {
-      throw new Error('OpenAI did not return a callback script.')
-    }
-
-    return { script: parsed.script.trim() }
   }
 }

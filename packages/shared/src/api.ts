@@ -1,5 +1,4 @@
 import { z } from 'zod'
-import { CallbackAttemptSchema } from './callback.js'
 import {
   CallListItemSchema,
   CallRecordSchema,
@@ -36,7 +35,6 @@ export const GetCallsResponseSchema = z.object({
 export const GetCallResponseSchema = z.object({
   call: CallRecordSchema,
   notes: z.array(CallNoteSchema),
-  callbackAttempts: z.array(CallbackAttemptSchema),
   recordingUrl: z.string().nullable(),
 })
 

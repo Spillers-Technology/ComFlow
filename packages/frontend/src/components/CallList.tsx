@@ -60,11 +60,19 @@ export function CallList({ items, isLoading }: { items: CallListItem[]; isLoadin
             </TableRow>
           )}
 
-          {!isLoading && items.map(item => (
+          {!isLoading && items.map(item => {
+            const isNew = item.status === 'new'
+            return (
             <TableRow
               key={item.id}
               hover
-              sx={{ cursor: 'pointer' }}
+              sx={{
+                cursor: 'pointer',
+                // Emphasize unreviewed ("new") voicemails with a left accent.
+                borderLeft: isNew ? 3 : 0,
+                borderColor: 'primary.main',
+                bgcolor: isNew ? 'action.hover' : undefined,
+              }}
               onClick={() => navigate(`/calls/${item.id}`)}
             >
               <TableCell>{new Date(item.createdAt).toLocaleString()}</TableCell>
@@ -87,7 +95,8 @@ export function CallList({ items, isLoading }: { items: CallListItem[]; isLoadin
               <TableCell>{item.assignedQueue ?? 'Unassigned'}</TableCell>
               <TableCell>{item.summary ?? 'No summary yet'}</TableCell>
             </TableRow>
-          ))}
+            )
+          })}
         </TableBody>
       </Table>
     </TableContainer>

@@ -1,5 +1,4 @@
 import {
-  CallbackAttemptStatus,
   InboundTelephonyWebhookInput,
   InboundTelephonyWebhookSchema,
   RecordingCompleteWebhookInput,
@@ -14,15 +13,5 @@ export class FakeTelephonyProvider implements TelephonyProvider {
 
   normalizeRecordingComplete(payload: unknown): RecordingCompleteWebhookInput {
     return RecordingCompleteWebhookSchema.parse(payload)
-  }
-
-  async simulateOutboundCallback(): Promise<{
-    providerCallId: string
-    status: CallbackAttemptStatus
-  }> {
-    return {
-      providerCallId: `fake-callback-${Date.now()}`,
-      status: 'simulated_completed',
-    }
   }
 }

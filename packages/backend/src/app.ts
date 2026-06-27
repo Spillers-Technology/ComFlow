@@ -1,18 +1,26 @@
 import cors from 'cors'
 import express, { NextFunction, Request, Response } from 'express'
-import { createCallbacksRouter } from './routes/callbacks.js'
+import { createAuthRouter } from './routes/auth.js'
 import { createCallsRouter } from './routes/calls.js'
 import { createHealthRouter } from './routes/health.js'
+import { createMailboxesRouter } from './routes/mailboxes.js'
+import { createPromptsRouter } from './routes/prompts.js'
+import { createScheduledCallsRouter } from './routes/scheduledCalls.js'
 import { createSettingsRouter } from './routes/settings.js'
 import { createWebhookRouter } from './routes/webhooks.js'
 import { config } from './config.js'
 import { HttpError } from './lib/errors.js'
+import { requireAuth } from './middleware/requireAuth.js'
 import { FakeTelephonyProvider } from './providers/telephony/fake.js'
 import { seedFakeData } from './seed/fakeData.js'
-import { CallbackService } from './services/callbackService.js'
+import { AudioPromptService } from './services/audioPromptService.js'
+import { AuthService } from './services/authService.js'
 import { CallIngestionService } from './services/callIngestionService.js'
 import { CallReviewService } from './services/callReviewService.js'
 import { EngineService } from './services/engineService.js'
+import { MailboxService } from './services/mailboxService.js'
+import { ScheduledCallService } from './services/scheduledCallService.js'
+import { TelephonyGatewayService } from './services/telephonyGatewayService.js'
 
 export function createApp() {
   const app = express()
@@ -20,7 +28,27 @@ export function createApp() {
   const engineService = new EngineService()
   const callIngestionService = new CallIngestionService(engineService)
   const callReviewService = new CallReviewService()
-  const callbackService = new CallbackService(engineService, telephonyProvider)
+  const authService = new AuthService()
+  const mailboxService = new MailboxService()
+  authService.bootstrap()
+  mailboxService.getDefault()
+
+  // Real SIP edge: connect to baresip and drive answer/record/ingest directly.
+  // In 'fake' mode the webhook endpoints remain the ingestion path.
+  const audioPromptService = new AudioPromptService()
+  const telephonyGateway = new TelephonyGatewayService(
+    callIngestionService,
+    audioPromptService
+  )
+  const scheduledCallService = new ScheduledCallService(
+    engineService,
+    telephonyGateway,
+    audioPromptService
+  )
+  if (config.telephony.mode === 'baresip') {
+    telephonyGateway.start()
+    scheduledCallService.startScheduler()
+  }
 
   if (config.seedDemo) {
     seedFakeData()
@@ -33,14 +61,24 @@ export function createApp() {
   )
   app.use(express.json({ limit: '10mb' }))
 
+  // Open endpoints: health, auth, and webhooks (machine-to-machine).
   app.use('/api/health', createHealthRouter(engineService))
-  app.use('/api/settings', createSettingsRouter(engineService))
-  app.use('/api/callbacks', createCallbacksRouter(callbackService))
-  app.use('/api/calls', createCallsRouter(callReviewService, callbackService))
+  app.use('/api/auth', createAuthRouter(authService))
   app.use(
     '/api/webhooks',
     createWebhookRouter(telephonyProvider, callIngestionService)
   )
+
+  // UI-facing endpoints, guarded by requireAuth (pass-through in open mode).
+  app.use('/api/settings', requireAuth, createSettingsRouter(engineService))
+  app.use('/api/calls', requireAuth, createCallsRouter(callReviewService))
+  app.use('/api/prompts', requireAuth, createPromptsRouter(audioPromptService))
+  app.use(
+    '/api/scheduled-calls',
+    requireAuth,
+    createScheduledCallsRouter(scheduledCallService)
+  )
+  app.use('/api/mailboxes', requireAuth, createMailboxesRouter(mailboxService))
 
   app.use(
     (

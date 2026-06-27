@@ -7,7 +7,10 @@ import {
 } from '../../shared/src/index.js'
 
 const packageRoot = process.cwd()
-const dataDir = path.join(packageRoot, 'data')
+// COMFLOW_DATA_DIR lets the backend and the baresip SIP edge share one volume
+// at an identical path, so recording/greeting/outbound paths resolve the same
+// in both containers.
+const dataDir = process.env.COMFLOW_DATA_DIR?.trim() || path.join(packageRoot, 'data')
 
 function readEnv(...names: string[]) {
   for (const name of names) {
@@ -38,10 +41,38 @@ export const config = {
   packageRoot,
   dataDir,
   recordingsDir: path.join(dataDir, 'recordings'),
-  callbackAudioDir: path.join(dataDir, 'callbacks'),
+  rawRecordingsDir: path.join(dataDir, 'recordings-raw'),
+  greetingsDir: path.join(dataDir, 'greetings'),
+  outboundAudioDir: path.join(dataDir, 'outbound'),
+  promptsDir: path.join(dataDir, 'prompts'),
   databasePath: path.join(dataDir, 'comflow.db'),
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
   seedDemo: process.env.COMFLOW_SEED_DEMO !== 'false',
+  telephony: {
+    // 'baresip' drives a real SIP UA (the SIP edge) over its ctrl_tcp interface.
+    // 'fake' keeps the webhook-only path used for local dev and tests.
+    mode: process.env.COMFLOW_TELEPHONY === 'baresip' ? 'baresip' : 'fake',
+    baresipCtrlHost: process.env.BARESIP_CTRL_HOST ?? '127.0.0.1',
+    baresipCtrlPort: Number(process.env.BARESIP_CTRL_PORT ?? 4444),
+    // WAV played to inbound callers before recording their voicemail.
+    greetingPath: readOptionalEnv('COMFLOW_GREETING_PATH'),
+    // SIP domain used to build outbound dial URIs (sip:<number>@<domain>).
+    // When empty, the raw number is dialed via baresip's default account.
+    sipOutboundDomain: readOptionalEnv('COMFLOW_SIP_OUTBOUND_DOMAIN'),
+    // Seconds to wait for an outbound call to be answered before giving up.
+    outboundAnswerTimeoutSec: Number(
+      process.env.COMFLOW_OUTBOUND_ANSWER_TIMEOUT_SEC ?? 45
+    ),
+    // Seconds to keep an answered outbound call up to capture the reply
+    // (after the message + question audio is played).
+    outboundCaptureWindowSec: Number(
+      process.env.COMFLOW_OUTBOUND_CAPTURE_WINDOW_SEC ?? 20
+    ),
+    // How often the scheduler checks for due outbound calls, in seconds.
+    schedulerIntervalSec: Number(
+      process.env.COMFLOW_SCHEDULER_INTERVAL_SEC ?? 15
+    ),
+  },
   secrets: {
     openaiApiKey: readEnv('COMFLOW_OPENAI_API_KEY', 'OPENAI_API_KEY'),
     anthropicApiKey: readEnv('COMFLOW_ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEY'),
@@ -49,6 +80,23 @@ export const config = {
       'COMFLOW_ELEVENLABS_API_KEY',
       'ELEVENLABS_API_KEY'
     ),
+  },
+  anchordesk: {
+    // Push reviewed ("gilded") voicemails into AnchorDesk as tickets.
+    syncEnabled: process.env.ANCHORDESK_SYNC_ENABLED === 'true',
+    baseUrl: readOptionalEnv('ANCHORDESK_BASE_URL'),
+    apiToken: readEnv('ANCHORDESK_API_TOKEN'),
+  },
+  auth: {
+    // Local accounts are first-class. When false (default), the API is open and
+    // a default admin identity is assumed — keeps dev/tests friction-free. Set
+    // true to enforce login. SSO (OIDC/SAML) slots in behind the same provider
+    // interface later (M2). Mirrors AnchorDesk's AUTH_* env shape.
+    required: process.env.COMFLOW_AUTH_REQUIRED === 'true',
+    sessionSecret: readEnv('COMFLOW_AUTH_SESSION_SECRET') || 'comflow-dev-secret',
+    bootstrapAdminEmail: readOptionalEnv('COMFLOW_BOOTSTRAP_ADMIN_EMAIL'),
+    bootstrapAdminPassword: readOptionalEnv('COMFLOW_BOOTSTRAP_ADMIN_PASSWORD'),
+    sessionTtlHours: Number(process.env.COMFLOW_AUTH_SESSION_TTL_HOURS ?? 720),
   },
   defaultEngineSettings: EngineSettingsSchema.parse({
     llm: {

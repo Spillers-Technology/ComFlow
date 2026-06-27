@@ -1,0 +1,101 @@
+import { randomUUID } from 'node:crypto'
+import {
+  Mailbox,
+  MailboxSchema,
+  UpdateMailboxRequest,
+} from '../../../shared/src/index.js'
+import { db } from '../db/client.js'
+
+type MailboxRow = {
+  id: string
+  name: string
+  number: string | null
+  greeting_prompt_id: string | null
+  sip_account_ref: string | null
+  created_at: string
+  updated_at: string
+}
+
+function mapRow(row: MailboxRow): Mailbox {
+  return MailboxSchema.parse({
+    id: row.id,
+    name: row.name,
+    number: row.number,
+    greetingPromptId: row.greeting_prompt_id,
+    sipAccountRef: row.sip_account_ref,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  })
+}
+
+export const mailboxRepository = {
+  list(): Mailbox[] {
+    const rows = db
+      .prepare('SELECT * FROM mailboxes ORDER BY datetime(created_at) ASC')
+      .all() as MailboxRow[]
+    return rows.map(mapRow)
+  },
+
+  getById(id: string): Mailbox | null {
+    const row = db.prepare('SELECT * FROM mailboxes WHERE id = ?').get(id) as
+      | MailboxRow
+      | undefined
+    return row ? mapRow(row) : null
+  },
+
+  /** The single mailbox in the current model; the earliest-created one. */
+  getDefault(): Mailbox | null {
+    const row = db
+      .prepare('SELECT * FROM mailboxes ORDER BY datetime(created_at) ASC LIMIT 1')
+      .get() as MailboxRow | undefined
+    return row ? mapRow(row) : null
+  },
+
+  /** Create the default mailbox on first boot so calls always have a home. */
+  ensureDefault(): Mailbox {
+    const existing = this.getDefault()
+    if (existing) return existing
+
+    const now = new Date().toISOString()
+    const row: MailboxRow = {
+      id: randomUUID(),
+      name: 'Main mailbox',
+      number: null,
+      greeting_prompt_id: null,
+      sip_account_ref: null,
+      created_at: now,
+      updated_at: now,
+    }
+    db.prepare(`
+      INSERT INTO mailboxes (
+        id, name, number, greeting_prompt_id, sip_account_ref, created_at, updated_at
+      )
+      VALUES (@id, @name, @number, @greeting_prompt_id, @sip_account_ref, @created_at, @updated_at)
+    `).run(row)
+    return mapRow(row)
+  },
+
+  update(id: string, patch: UpdateMailboxRequest): Mailbox | null {
+    const existing = this.getById(id)
+    if (!existing) return null
+
+    db.prepare(`
+      UPDATE mailboxes
+      SET name = ?, number = ?, greeting_prompt_id = ?, sip_account_ref = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      patch.name ?? existing.name,
+      patch.number !== undefined ? patch.number : existing.number,
+      patch.greetingPromptId !== undefined
+        ? patch.greetingPromptId
+        : existing.greetingPromptId,
+      patch.sipAccountRef !== undefined
+        ? patch.sipAccountRef
+        : existing.sipAccountRef,
+      new Date().toISOString(),
+      id
+    )
+
+    return this.getById(id)
+  },
+}

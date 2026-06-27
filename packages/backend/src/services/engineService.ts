@@ -1,5 +1,4 @@
 import {
-  CallRecord,
   EngineKind,
   EngineReadinessMap,
   EngineSettings,
@@ -121,14 +120,7 @@ export class EngineService {
     return ExtractedCallFieldsSchema.parse(result)
   }
 
-  async generateCallbackScript(input: {
-    call: CallRecord
-    notes: string | null
-  }) {
-    return this.createLanguageModelProvider().generateCallbackScript(input)
-  }
-
-  async synthesizeCallbackAudio(input: { text: string }) {
+  async synthesizeSpeech(input: { text: string }) {
     return this.createTextToSpeechProvider().synthesize({ text: input.text })
   }
 
