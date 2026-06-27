@@ -1,3 +1,4 @@
+import path from 'node:path'
 import cors from 'cors'
 import express, { NextFunction, Request, Response } from 'express'
 import { createAuthRouter } from './routes/auth.js'
@@ -79,6 +80,16 @@ export function createApp() {
     createScheduledCallsRouter(scheduledCallService)
   )
   app.use('/api/mailboxes', requireAuth, createMailboxesRouter(mailboxService))
+
+  // Serve the built frontend (production single-image deploy). API routes above
+  // win; everything else falls back to the SPA entry point.
+  if (config.staticDir) {
+    const staticDir = config.staticDir
+    app.use(express.static(staticDir))
+    app.get(/^(?!\/api\/).*/, (_request, response) => {
+      response.sendFile(path.join(staticDir, 'index.html'))
+    })
+  }
 
   app.use(
     (
