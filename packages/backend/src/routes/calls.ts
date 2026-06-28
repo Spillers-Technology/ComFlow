@@ -5,6 +5,7 @@ import {
   CallStatusSchema,
   CallUpdateInputSchema,
   CreateCallNoteInputSchema,
+  User,
 } from '../../../shared/src/index.js'
 import { config } from '../config.js'
 import { HttpError } from '../lib/errors.js'
@@ -33,7 +34,10 @@ export function createCallsRouter(callReviewService: CallReviewService) {
     response: Response,
     options: { download: boolean }
   ) {
-    const detail = callReviewService.getCallDetail(id)
+    const detail = callReviewService.getCallDetail(
+      id,
+      response.locals.user as User
+    )
     if (!detail.call.recordingPath) {
       throw new HttpError(404, 'Recording not found.')
     }
@@ -69,7 +73,10 @@ export function createCallsRouter(callReviewService: CallReviewService) {
       const q = typeof request.query.q === 'string' ? request.query.q : undefined
 
       response.json({
-        items: callReviewService.listCalls({ status, intent, assignedQueue, q }),
+        items: callReviewService.listCalls(
+          { status, intent, assignedQueue, q },
+          response.locals.user as User
+        ),
       })
     })
   )
@@ -84,7 +91,10 @@ export function createCallsRouter(callReviewService: CallReviewService) {
         throw new HttpError(400, 'Call id is required.')
       }
 
-      const detail = callReviewService.getCallDetail(id)
+      const detail = callReviewService.getCallDetail(
+        id,
+        response.locals.user as User
+      )
       response.json({
         ...detail,
         recordingUrl: detail.call.recordingPath
@@ -136,7 +146,11 @@ export function createCallsRouter(callReviewService: CallReviewService) {
       }
 
       const input = parseBody(CallUpdateInputSchema, request.body)
-      const call = await callReviewService.updateCall(id, input)
+      const call = await callReviewService.updateCall(
+        id,
+        input,
+        response.locals.user as User
+      )
       response.json({ call })
     })
   )
@@ -152,7 +166,11 @@ export function createCallsRouter(callReviewService: CallReviewService) {
       }
 
       const input = parseBody(CreateCallNoteInputSchema, request.body)
-      const note = callReviewService.addNote(id, input)
+      const note = callReviewService.addNote(
+        id,
+        input,
+        response.locals.user as User
+      )
       response.status(201).json({ note })
     })
   )

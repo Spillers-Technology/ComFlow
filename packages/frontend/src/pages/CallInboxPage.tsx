@@ -15,8 +15,9 @@ import {
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { CallIntentSchema, CallListItem, CallStatusSchema } from '../../../shared/src/index.js'
+import { useAuth } from '../app/AuthContext'
 import { CallList } from '../components/CallList'
-import { getCalls } from '../lib/api'
+import { getCalls, getMailboxes } from '../lib/api'
 
 function formatIntent(intent: string): string {
   return intent.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
@@ -30,6 +31,18 @@ export function CallInboxPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [mailboxCount, setMailboxCount] = useState<number | null>(null)
+  const { user, authRequired } = useAuth()
+
+  useEffect(() => {
+    void getMailboxes()
+      .then(result => setMailboxCount(result.items.length))
+      .catch(() => setMailboxCount(null))
+  }, [])
+
+  // A member with no granted mailboxes has nothing to see — explain why.
+  const noMailboxAccess =
+    authRequired && user?.role === 'member' && mailboxCount === 0
 
   useEffect(() => {
     let cancelled = false
@@ -67,7 +80,7 @@ export function CallInboxPage() {
     <Container maxWidth="xl" sx={{ py: 4 }}>
       <Stack spacing={3}>
         <Box>
-          <Typography variant="h3">ComFlow inbox</Typography>
+          <Typography variant="h4" fontWeight={700}>ComFlow inbox</Typography>
           <Typography color="text.secondary">
             Review new calls, confirm what matters, and move the next action
             forward.
@@ -129,7 +142,14 @@ export function CallInboxPage() {
 
         {error && <Alert severity="error">{error}</Alert>}
 
-        <CallList items={items} isLoading={loading} />
+        {noMailboxAccess ? (
+          <Alert severity="info">
+            No mailboxes assigned yet — ask an admin to add you to a group with
+            mailbox access.
+          </Alert>
+        ) : (
+          <CallList items={items} isLoading={loading} />
+        )}
       </Stack>
     </Container>
   )

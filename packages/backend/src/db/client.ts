@@ -11,6 +11,9 @@ fs.mkdirSync(config.promptsDir, { recursive: true })
 export const db = new Database(config.databasePath)
 
 db.pragma('journal_mode = WAL')
+// Enforce foreign keys so RBAC cascade deletes (e.g. removing a group clears its
+// memberships and mailbox grants) actually fire.
+db.pragma('foreign_keys = ON')
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS calls (
@@ -66,6 +69,19 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS sip_settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled INTEGER NOT NULL,
+    account_label TEXT NOT NULL,
+    account_uri TEXT,
+    auth_username TEXT,
+    outbound_proxy TEXT,
+    outbound_dialing_domain TEXT,
+    registration_interval INTEGER NOT NULL,
+    preferred_codecs_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS scheduled_calls (
     id TEXT PRIMARY KEY,
     to_number TEXT NOT NULL,
@@ -114,6 +130,50 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 
+  -- RBAC (M3): groups grant mailbox visibility. Admins see everything; members
+  -- see only the mailboxes their groups grant.
+  CREATE TABLE IF NOT EXISTS groups (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS group_members (
+    group_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    PRIMARY KEY (group_id, user_id),
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS group_mailboxes (
+    group_id TEXT NOT NULL,
+    mailbox_id TEXT NOT NULL,
+    PRIMARY KEY (group_id, mailbox_id),
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE
+  );
+
+  -- Maps an IdP group name (from an SSO assertion) onto a ComFlow group, so
+  -- membership can be synced on every SSO login.
+  CREATE TABLE IF NOT EXISTS sso_group_mappings (
+    external_name TEXT PRIMARY KEY,
+    group_id TEXT NOT NULL,
+    FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE
+  );
+
+  -- Transient CSRF/nonce store for the SSO redirect round-trip. Rows are
+  -- consumed (deleted) on callback; stale rows are swept by age.
+  CREATE TABLE IF NOT EXISTS sso_login_states (
+    state TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    nonce TEXT,
+    code_verifier TEXT,
+    created_at TEXT NOT NULL
+  );
+
   CREATE INDEX IF NOT EXISTS idx_calls_created_at ON calls(created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_calls_status ON calls(status);
   CREATE INDEX IF NOT EXISTS idx_calls_intent ON calls(intent);
@@ -139,3 +199,7 @@ addColumnIfMissing('scheduled_calls', 'message_prompt_id', 'TEXT')
 addColumnIfMissing('scheduled_calls', 'question_prompt_id', 'TEXT')
 addColumnIfMissing('calls', 'mailbox_id', 'TEXT')
 addColumnIfMissing('calls', 'email_notified_at', 'TEXT')
+// Snapshot of the operator who reviewed/assigned the call (display name or email).
+addColumnIfMissing('calls', 'reviewed_by', 'TEXT')
+// Links a local user row to an external SSO identity (subject/nameID).
+addColumnIfMissing('users', 'external_id', 'TEXT')

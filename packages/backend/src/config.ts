@@ -2,6 +2,7 @@ import path from 'node:path'
 import {
   EngineSettingsSchema,
   LlmProviderSchema,
+  SipSettingsSchema,
   SttProviderSchema,
   TtsProviderSchema,
 } from '../../shared/src/index.js'
@@ -69,6 +70,12 @@ export const config = {
     mode: process.env.COMFLOW_TELEPHONY === 'baresip' ? 'baresip' : 'fake',
     baresipCtrlHost: process.env.BARESIP_CTRL_HOST ?? '127.0.0.1',
     baresipCtrlPort: Number(process.env.BARESIP_CTRL_PORT ?? 4444),
+    baresipAccountsPath:
+      readOptionalEnv('BARESIP_ACCOUNTS_PATH') ??
+      path.join(dataDir, 'baresip', 'accounts'),
+    baresipRestartUrl:
+      readOptionalEnv('COMFLOW_BARESIP_RESTART_URL') ??
+      readOptionalEnv('BARESIP_RESTART_URL'),
     // WAV played to inbound callers before recording their voicemail.
     greetingPath: readOptionalEnv('COMFLOW_GREETING_PATH'),
     // SIP domain used to build outbound dial URIs (sip:<number>@<domain>).
@@ -95,6 +102,7 @@ export const config = {
       'COMFLOW_ELEVENLABS_API_KEY',
       'ELEVENLABS_API_KEY'
     ),
+    sipAuthPassword: readEnv('COMFLOW_SIP_AUTH_PASSWORD'),
   },
   anchordesk: {
     // Push reviewed ("gilded") voicemails into AnchorDesk as tickets.
@@ -124,13 +132,59 @@ export const config = {
   auth: {
     // Local accounts are first-class. When false (default), the API is open and
     // a default admin identity is assumed — keeps dev/tests friction-free. Set
-    // true to enforce login. SSO (OIDC/SAML) slots in behind the same provider
-    // interface later (M2). Mirrors AnchorDesk's AUTH_* env shape.
+    // true to enforce login. SSO (OIDC/SAML, M2) slots in behind the SsoProvider
+    // abstraction. Env names mirror AnchorDesk's AUTH_*/OIDC_*/SAML_* shape, with
+    // COMFLOW_* kept as fallbacks for the vars that already shipped.
     required: process.env.COMFLOW_AUTH_REQUIRED === 'true',
-    sessionSecret: readEnv('COMFLOW_AUTH_SESSION_SECRET') || 'comflow-dev-secret',
+    // Set AUTH_LOCAL_ENABLED=false for SSO-only deployments (hides the password
+    // form). Defaults on.
+    localEnabled: process.env.AUTH_LOCAL_ENABLED !== 'false',
+    sessionSecret:
+      readEnv('AUTH_SESSION_SECRET', 'COMFLOW_AUTH_SESSION_SECRET') ||
+      'comflow-dev-secret',
     bootstrapAdminEmail: readOptionalEnv('COMFLOW_BOOTSTRAP_ADMIN_EMAIL'),
     bootstrapAdminPassword: readOptionalEnv('COMFLOW_BOOTSTRAP_ADMIN_PASSWORD'),
     sessionTtlHours: Number(process.env.COMFLOW_AUTH_SESSION_TTL_HOURS ?? 720),
+    // Emails promoted to admin on every SSO login (promotion-only; never demotes).
+    adminEmails: readCsvEnv('AUTH_ADMIN_EMAILS').map(value => value.toLowerCase()),
+    // Where the backend sends the browser after a successful SSO round-trip; the
+    // session token rides in the URL fragment. Defaults to the SPA login route.
+    ssoSuccessRedirect:
+      readOptionalEnv('COMFLOW_SSO_SUCCESS_REDIRECT') ??
+      `${process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173'}/login`,
+    oidc: {
+      issuerUrl: readOptionalEnv('OIDC_ISSUER_URL'),
+      clientId: readOptionalEnv('OIDC_CLIENT_ID'),
+      clientSecret: readOptionalEnv('OIDC_CLIENT_SECRET'),
+      redirectUri: readOptionalEnv('OIDC_REDIRECT_URI'),
+      scopes: readEnv('OIDC_SCOPES') || 'openid email profile',
+      // ID-token/userinfo claim holding the user's group names.
+      groupsClaim: readEnv('OIDC_GROUPS_CLAIM') || 'groups',
+      label: readEnv('OIDC_LABEL') || 'Single sign-on',
+      // OIDC is on only when fully configured; OIDC_DISABLED=true forces it off.
+      get enabled() {
+        return (
+          process.env.OIDC_DISABLED !== 'true' &&
+          Boolean(
+            this.issuerUrl && this.clientId && this.clientSecret && this.redirectUri
+          )
+        )
+      },
+    },
+    saml: {
+      entryPoint: readOptionalEnv('SAML_ENTRY_POINT'),
+      issuer: readOptionalEnv('SAML_ISSUER'),
+      idpCert: readOptionalEnv('SAML_IDP_CERT'),
+      callbackUrl: readOptionalEnv('SAML_CALLBACK_URL'),
+      groupsAttribute: readEnv('SAML_GROUPS_ATTRIBUTE') || 'groups',
+      label: readEnv('SAML_LABEL') || 'SAML sign-on',
+      get enabled() {
+        return (
+          process.env.SAML_DISABLED !== 'true' &&
+          Boolean(this.entryPoint && this.issuer && this.idpCert && this.callbackUrl)
+        )
+      },
+    },
   },
   defaultMailbox: {
     name: readOptionalEnv('COMFLOW_DEFAULT_MAILBOX_NAME') ?? 'Main mailbox',
@@ -160,5 +214,23 @@ export const config = {
       model: readOptionalEnv('COMFLOW_DEFAULT_TTS_MODEL'),
       voice: readOptionalEnv('COMFLOW_DEFAULT_TTS_VOICE'),
     },
+  }),
+  defaultSipSettings: SipSettingsSchema.parse({
+    enabled: (() => {
+      const value = process.env.COMFLOW_SIP_ENABLED?.trim()
+      if (value === 'true') return true
+      if (value === 'false') return false
+      return Boolean(readOptionalEnv('COMFLOW_SIP_ACCOUNT_URI'))
+    })(),
+    accountLabel:
+      readOptionalEnv('COMFLOW_SIP_ACCOUNT_LABEL') ??
+      readOptionalEnv('COMFLOW_DEFAULT_MAILBOX_SIP_ACCOUNT_REF') ??
+      'main',
+    accountUri: readOptionalEnv('COMFLOW_SIP_ACCOUNT_URI'),
+    authUsername: readOptionalEnv('COMFLOW_SIP_AUTH_USERNAME'),
+    outboundProxy: readOptionalEnv('COMFLOW_SIP_OUTBOUND_PROXY'),
+    outboundDialingDomain: readOptionalEnv('COMFLOW_SIP_OUTBOUND_DOMAIN'),
+    registrationInterval: process.env.COMFLOW_SIP_REGISTRATION_INTERVAL,
+    preferredCodecs: readCsvEnv('COMFLOW_SIP_PREFERRED_CODECS'),
   }),
 }

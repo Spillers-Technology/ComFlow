@@ -24,6 +24,16 @@ process.env.COMFLOW_DEFAULT_TTS_VOICE = 'alloy'
 process.env.COMFLOW_DEFAULT_MAILBOX_NAME = 'Cluster mailbox'
 process.env.COMFLOW_DEFAULT_MAILBOX_NUMBER = '+15550123'
 process.env.COMFLOW_DEFAULT_MAILBOX_SIP_ACCOUNT_REF = 'cluster-sip-main'
+const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'comflow-test-data-'))
+process.env.COMFLOW_DATA_DIR = testDataDir
+process.env.BARESIP_ACCOUNTS_PATH = path.join(
+  testDataDir,
+  'baresip',
+  'accounts'
+)
+process.env.COMFLOW_SIP_AUTH_PASSWORD = ''
+// Exercises the SSO admin allowlist (promote-on-login) in the provisioning test.
+process.env.AUTH_ADMIN_EMAILS = 'boss@example.com'
 
 async function getModules() {
   const [{ createApp }, { db }] = await Promise.all([
@@ -36,13 +46,22 @@ async function getModules() {
 
 async function resetDb() {
   const { db } = await getModules()
+  // Child tables first so deletes don't trip foreign-key constraints.
   db.exec(`
     DELETE FROM call_notes;
     DELETE FROM calls;
     DELETE FROM engine_settings;
     DELETE FROM engine_secret_overrides;
+    DELETE FROM sip_settings;
+    DELETE FROM group_members;
+    DELETE FROM group_mailboxes;
+    DELETE FROM sso_group_mappings;
+    DELETE FROM sso_login_states;
+    DELETE FROM groups;
+    DELETE FROM users;
     DELETE FROM mailboxes;
   `)
+  fs.rmSync(process.env.BARESIP_ACCOUNTS_PATH!, { force: true })
 }
 
 async function withServer<T>(run: (baseUrl: string) => Promise<T>) {
@@ -248,6 +267,108 @@ async function main() {
     })
   })
 
+  await runTest('baresip account rendering uses the expected format', async () => {
+    const { renderBaresipAccountLine } = await import(
+      './services/baresipManagementService.js'
+    )
+
+    const line = renderBaresipAccountLine(
+      {
+        enabled: true,
+        accountLabel: 'main',
+        accountUri: 'sip:1001@pbx.example.com',
+        authUsername: 'auth-1001',
+        outboundProxy: 'sip:sbc.example.com',
+        outboundDialingDomain: 'pbx.example.com',
+        registrationInterval: 600,
+        preferredCodecs: ['PCMU/8000/1', 'PCMA/8000/1'],
+      },
+      'sip-secret'
+    )
+
+    assert.equal(
+      line,
+      '"main" <sip:1001@pbx.example.com>;auth_user="auth-1001";auth_pass="sip-secret";outbound="sip:sbc.example.com";answermode=auto;regint=600;audio_codecs=PCMU/8000/1,PCMA/8000/1'
+    )
+  })
+
+  await runTest('SIP settings write accounts file without API password leak', async () => {
+    await withServer(async baseUrl => {
+      const settings = {
+        enabled: true,
+        accountLabel: 'main',
+        accountUri: 'sip:1001@pbx.example.com',
+        authUsername: 'auth-1001',
+        outboundProxy: 'sip:sbc.example.com',
+        outboundDialingDomain: 'pbx.example.com',
+        registrationInterval: 600,
+        preferredCodecs: ['PCMU/8000/1', 'PCMA/8000/1'],
+      }
+
+      const saved = await requestJson(baseUrl, '/api/settings/sip', {
+        method: 'PUT',
+        body: JSON.stringify({
+          settings,
+          secrets: { authPassword: 'admin-sip-password' },
+        }),
+      })
+      const savedText = JSON.stringify(saved.body)
+      const savedBody = saved.body as {
+        settings: { accountUri: string }
+        secrets: { authPassword: { source: string; configured: boolean } }
+        status: { accountsPath: string }
+      }
+
+      assert.equal(saved.response.status, 200)
+      assert.equal(savedBody.settings.accountUri, 'sip:1001@pbx.example.com')
+      assert.equal(savedBody.secrets.authPassword.source, 'stored')
+      assert.equal(savedBody.secrets.authPassword.configured, true)
+      assert.equal(savedText.includes('admin-sip-password'), false)
+      assert.equal(
+        savedBody.status.accountsPath,
+        process.env.BARESIP_ACCOUNTS_PATH
+      )
+
+      const accounts = fs.readFileSync(
+        process.env.BARESIP_ACCOUNTS_PATH!,
+        'utf8'
+      )
+      assert.match(accounts, /<sip:1001@pbx\.example\.com>/)
+      assert.match(accounts, /auth_pass="admin-sip-password"/)
+      assert.match(accounts, /audio_codecs=PCMU\/8000\/1,PCMA\/8000\/1/)
+
+      const reloaded = await requestJson(baseUrl, '/api/settings/sip')
+      assert.equal(JSON.stringify(reloaded.body).includes('admin-sip-password'), false)
+    })
+  })
+
+  await runTest('invalid SIP settings are rejected', async () => {
+    await withServer(async baseUrl => {
+      const result = await requestJson(baseUrl, '/api/settings/sip', {
+        method: 'PUT',
+        body: JSON.stringify({
+          settings: {
+            enabled: true,
+            accountLabel: 'main',
+            accountUri: 'not-a-sip-uri',
+            authUsername: null,
+            outboundProxy: null,
+            outboundDialingDomain: null,
+            registrationInterval: 600,
+            preferredCodecs: [],
+          },
+          secrets: { authPassword: 'admin-sip-password' },
+        }),
+      })
+
+      assert.equal(result.response.status, 400)
+      assert.match(
+        String((result.body as { error?: string } | null)?.error),
+        /SIP account URI/
+      )
+    })
+  })
+
   await runTest('mailbox env defaults apply on first boot', async () => {
     await withServer(async baseUrl => {
       const result = await requestJson(baseUrl, '/api/mailboxes')
@@ -409,8 +530,417 @@ async function main() {
     })
   })
 
+  await runTest('rbac scopes mailbox access and call lists', async () => {
+    const { db } = await getModules()
+    const { userRepository } = await import('./repositories/userRepository.js')
+    const { groupRepository } = await import('./repositories/groupRepository.js')
+    const { callRepository } = await import('./repositories/callRepository.js')
+    const { accessService, ALL_MAILBOXES } = await import(
+      './services/accessService.js'
+    )
+    const { CallReviewService } = await import('./services/callReviewService.js')
+
+    const now = new Date().toISOString()
+    const insertMailbox = db.prepare(`
+      INSERT INTO mailboxes (id, name, number, greeting_prompt_id, sip_account_ref, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `)
+    insertMailbox.run('mb-a', 'Mailbox A', null, null, null, now, now)
+    insertMailbox.run('mb-b', 'Mailbox B', null, null, null, now, now)
+
+    const admin = userRepository.create({
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      passwordHash: null,
+      role: 'admin',
+    })
+    const member = userRepository.create({
+      email: 'member@example.com',
+      displayName: 'Member',
+      passwordHash: null,
+      role: 'member',
+    })
+
+    const group = groupRepository.create({ name: 'Team A' })
+    groupRepository.setMailboxes(group.id, ['mb-a'])
+    groupRepository.setMembers(group.id, [member.id])
+
+    assert.equal(accessService.accessibleMailboxIds(admin), ALL_MAILBOXES)
+    assert.deepEqual(accessService.accessibleMailboxIds(member), ['mb-a'])
+
+    const callA = callRepository.createInitial({
+      telephonyCallId: 'c-a',
+      source: 'fake',
+      callbackNumber: null,
+      mailboxId: 'mb-a',
+    })
+    callRepository.createInitial({
+      telephonyCallId: 'c-b',
+      source: 'fake',
+      callbackNumber: null,
+      mailboxId: 'mb-b',
+    })
+
+    const service = new CallReviewService()
+    assert.deepEqual(
+      service.listCalls({}, member).map(call => call.id),
+      [callA.id]
+    )
+    assert.equal(service.listCalls({}, admin).length, 2)
+
+    // The member can open their own call but not one in a mailbox they lack.
+    assert.equal(service.getCallDetail(callA.id, member).call.id, callA.id)
+    const callB = callRepository.getByTelephonyCallId('c-b')!
+    assert.throws(
+      () => service.getCallDetail(callB.id, member),
+      /Call not found/
+    )
+  })
+
+  await runTest('requireAdmin blocks non-admins', async () => {
+    const { requireAdmin } = await import('./middleware/requireAdmin.js')
+
+    function run(role: 'admin' | 'member') {
+      const result = { status: 0, nexted: false }
+      const response = {
+        locals: {
+          user: {
+            id: 'u',
+            email: 'e@example.com',
+            displayName: null,
+            role,
+            authProvider: 'local',
+          },
+        },
+        status(code: number) {
+          result.status = code
+          return this
+        },
+        json() {
+          return this
+        },
+      }
+      requireAdmin({} as never, response as never, () => {
+        result.nexted = true
+      })
+      return result
+    }
+
+    const member = run('member')
+    assert.equal(member.status, 403)
+    assert.equal(member.nexted, false)
+
+    const admin = run('admin')
+    assert.equal(admin.nexted, true)
+  })
+
+  await runTest(
+    'sso provisioning creates users, promotes admins, syncs mapped groups',
+    async () => {
+      const { SsoService } = await import('./services/ssoService.js')
+      const { groupRepository } = await import(
+        './repositories/groupRepository.js'
+      )
+      const { userRepository } = await import('./repositories/userRepository.js')
+      type SsoIdentity = import('./providers/auth/types.js').SsoIdentity
+      type SsoProvider = import('./providers/auth/types.js').SsoProvider
+
+      const opsGroup = groupRepository.create({ name: 'Ops' })
+      groupRepository.setMappings([
+        { externalName: 'ops', groupId: opsGroup.id },
+      ])
+
+      class FakeProvider implements SsoProvider {
+        readonly id = 'oidc' as const
+        readonly label = 'Fake'
+        constructor(private readonly identity: SsoIdentity) {}
+        async start() {
+          return {
+            redirectUrl: 'https://idp/authorize',
+            state: `state-${this.identity.email}`,
+            nonce: null,
+            codeVerifier: null,
+          }
+        }
+        async complete() {
+          return this.identity
+        }
+      }
+
+      // boss is in AUTH_ADMIN_EMAILS and carries the mapped "ops" group.
+      const bossSvc = new SsoService([
+        new FakeProvider({
+          email: 'boss@example.com',
+          displayName: 'Boss',
+          externalId: 'sub-boss',
+          groups: ['ops'],
+        }),
+      ])
+      await bossSvc.start('oidc')
+      const boss = await bossSvc.complete('oidc', {
+        callbackUrl: 'https://app/cb',
+        state: 'state-boss@example.com',
+      })
+      assert.equal(boss.user.email, 'boss@example.com')
+      assert.equal(boss.user.role, 'admin')
+      assert.ok(boss.token)
+      assert.ok(
+        groupRepository
+          .getDetail(opsGroup.id)!
+          .members.some(m => m.email === 'boss@example.com')
+      )
+
+      // A non-allowlisted user with no mapped groups stays a member.
+      const workerSvc = new SsoService([
+        new FakeProvider({
+          email: 'worker@example.com',
+          displayName: 'Worker',
+          externalId: 'sub-worker',
+          groups: [],
+        }),
+      ])
+      await workerSvc.start('oidc')
+      const worker = await workerSvc.complete('oidc', {
+        callbackUrl: 'https://app/cb',
+        state: 'state-worker@example.com',
+      })
+      assert.equal(worker.user.role, 'member')
+      assert.equal(userRepository.getByEmail('worker@example.com')?.authProvider, 'oidc')
+    }
+  )
+
+  await runTest('auth providers endpoint reflects config', async () => {
+    await withServer(async baseUrl => {
+      const providers = await requestJson(baseUrl, '/api/auth/providers')
+      const providersBody = providers.body as {
+        localEnabled: boolean
+        providers: unknown[]
+      }
+      assert.equal(providers.response.status, 200)
+      assert.equal(providersBody.localEnabled, true)
+      assert.deepEqual(providersBody.providers, [])
+
+      const me = await requestJson(baseUrl, '/api/auth/me')
+      const meBody = me.body as {
+        authRequired: boolean
+        localEnabled: boolean
+        providers: unknown[]
+      }
+      assert.equal(meBody.authRequired, false)
+      assert.equal(meBody.localEnabled, true)
+      assert.deepEqual(meBody.providers, [])
+    })
+  })
+
+  await runTest('groups can be created and granted mailboxes', async () => {
+    await withServer(async baseUrl => {
+      const mailboxes = await requestJson(baseUrl, '/api/mailboxes')
+      const mailboxId = (mailboxes.body as { items: { id: string }[] })
+        .items[0]!.id
+
+      const created = await requestJson(baseUrl, '/api/groups', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Support' }),
+      })
+      assert.equal(created.response.status, 201)
+      const groupId = (created.body as { group: { id: string } }).group.id
+
+      const granted = await requestJson(
+        baseUrl,
+        `/api/groups/${groupId}/mailboxes`,
+        { method: 'PUT', body: JSON.stringify({ mailboxIds: [mailboxId] }) }
+      )
+      assert.equal(granted.response.status, 200)
+      const grantedBody = granted.body as {
+        group: { mailboxes: { id: string }[] }
+      }
+      assert.deepEqual(
+        grantedBody.group.mailboxes.map(mailbox => mailbox.id),
+        [mailboxId]
+      )
+
+      const list = await requestJson(baseUrl, '/api/groups')
+      assert.equal((list.body as { items: unknown[] }).items.length, 1)
+    })
+  })
+
+  await runTest('inbound calls route to a mailbox by dialed DID', async () => {
+    await withServer(async baseUrl => {
+      await requestJson(baseUrl, '/api/settings/engines', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          llm: { provider: 'fake', model: null },
+          stt: { provider: 'fake', model: null },
+          tts: { provider: 'fake', model: null, voice: null },
+        }),
+      })
+
+      const initial = await requestJson(baseUrl, '/api/mailboxes')
+      const defaultMailboxId = (initial.body as { items: { id: string }[] })
+        .items[0]!.id
+
+      const created = await requestJson(baseUrl, '/api/mailboxes', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Sales', number: '+19998887777' }),
+      })
+      const salesMailboxId = (created.body as { mailbox: { id: string } })
+        .mailbox.id
+
+      // A call dialing the Sales DID lands in the Sales mailbox.
+      await requestJson(baseUrl, '/api/webhooks/telephony/inbound', {
+        method: 'POST',
+        body: JSON.stringify({
+          telephonyCallId: 'route-sales',
+          source: 'fake',
+          fromNumber: '+15551112222',
+          toNumber: '+19998887777',
+          transcript: 'Hi, calling about a sales quote.',
+        }),
+      })
+      // A call with no/unknown DID falls back to the default mailbox.
+      await requestJson(baseUrl, '/api/webhooks/telephony/inbound', {
+        method: 'POST',
+        body: JSON.stringify({
+          telephonyCallId: 'route-default',
+          source: 'fake',
+          fromNumber: '+15553334444',
+          transcript: 'Hi, just a general question.',
+        }),
+      })
+
+      const list = await requestJson(baseUrl, '/api/calls')
+      const items = (list.body as { items: { id: string }[] }).items
+      const mailboxOf = async (telephonyCallId: string) => {
+        for (const item of items) {
+          const detail = await requestJson(baseUrl, `/api/calls/${item.id}`)
+          const call = (detail.body as { call: { telephonyCallId: string; mailboxId: string } }).call
+          if (call.telephonyCallId === telephonyCallId) return call.mailboxId
+        }
+        return null
+      }
+
+      assert.equal(await mailboxOf('route-sales'), salesMailboxId)
+      assert.equal(await mailboxOf('route-default'), defaultMailboxId)
+    })
+  })
+
+  await runTest('mailboxes can be created but never the last deleted', async () => {
+    await withServer(async baseUrl => {
+      const before = await requestJson(baseUrl, '/api/mailboxes')
+      const defaultId = (before.body as { items: { id: string }[] }).items[0]!.id
+
+      const created = await requestJson(baseUrl, '/api/mailboxes', {
+        method: 'POST',
+        body: JSON.stringify({ name: 'Support', number: '+18005551234' }),
+      })
+      assert.equal(created.response.status, 201)
+      const supportId = (created.body as { mailbox: { id: string } }).mailbox.id
+
+      const two = await requestJson(baseUrl, '/api/mailboxes')
+      assert.equal((two.body as { items: unknown[] }).items.length, 2)
+
+      const del = await fetch(`${baseUrl}/api/mailboxes/${supportId}`, {
+        method: 'DELETE',
+      })
+      assert.equal(del.status, 204)
+
+      // Deleting the only remaining mailbox is refused.
+      const delLast = await requestJson(baseUrl, `/api/mailboxes/${defaultId}`, {
+        method: 'DELETE',
+      })
+      assert.equal(delLast.response.status, 400)
+      assert.match(
+        String((delLast.body as { error?: string } | null)?.error),
+        /only mailbox/
+      )
+    })
+  })
+
+  await runTest('user management creates users and protects the last admin', async () => {
+    await withServer(async baseUrl => {
+      const admin = await requestJson(baseUrl, '/api/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: 'admin@example.com',
+          password: 'supersecret',
+          role: 'admin',
+        }),
+      })
+      assert.equal(admin.response.status, 201)
+      const adminId = (admin.body as { user: { id: string } }).user.id
+
+      const member = await requestJson(baseUrl, '/api/users', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: 'member@example.com',
+          password: 'supersecret',
+          role: 'member',
+        }),
+      })
+      assert.equal(member.response.status, 201)
+
+      const list = await requestJson(baseUrl, '/api/users')
+      assert.equal((list.body as { items: unknown[] }).items.length, 2)
+
+      // The new member is assignable to groups.
+      const assignable = await requestJson(baseUrl, '/api/groups/users')
+      assert.ok(
+        (assignable.body as { items: { email: string }[] }).items.some(
+          u => u.email === 'member@example.com'
+        )
+      )
+
+      // The sole admin can't be demoted or deleted.
+      const demote = await requestJson(baseUrl, `/api/users/${adminId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ role: 'member' }),
+      })
+      assert.equal(demote.response.status, 400)
+      const remove = await requestJson(baseUrl, `/api/users/${adminId}`, {
+        method: 'DELETE',
+      })
+      assert.equal(remove.response.status, 400)
+    })
+  })
+
+  await runTest('reviewing a call records who reviewed it', async () => {
+    await withServer(async baseUrl => {
+      await requestJson(baseUrl, '/api/settings/engines', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          llm: { provider: 'fake', model: null },
+          stt: { provider: 'fake', model: null },
+          tts: { provider: 'fake', model: null, voice: null },
+        }),
+      })
+      await requestJson(baseUrl, '/api/webhooks/telephony/inbound', {
+        method: 'POST',
+        body: JSON.stringify({
+          telephonyCallId: 'attrib-1',
+          source: 'fake',
+          fromNumber: '+15550000000',
+          transcript: 'Please call me back.',
+        }),
+      })
+
+      const list = await requestJson(baseUrl, '/api/calls')
+      const callId = (list.body as { items: { id: string }[] }).items[0]!.id
+
+      await requestJson(baseUrl, `/api/calls/${callId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'reviewed' }),
+      })
+
+      const detail = await requestJson(baseUrl, `/api/calls/${callId}`)
+      const call = (detail.body as { call: { reviewedBy: string | null } }).call
+      // Open-mode identity reviews as "Open Mode".
+      assert.equal(call.reviewedBy, 'Open Mode')
+    })
+  })
+
   const { db } = await getModules()
   db.close()
+  fs.rmSync(testDataDir, { recursive: true, force: true })
 }
 
 void main().catch(error => {

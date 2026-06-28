@@ -133,7 +133,7 @@ export function ScheduledCallsPage() {
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Stack spacing={3}>
         <Box>
-          <Typography variant="h3">Scheduled calls</Typography>
+          <Typography variant="h4" fontWeight={700}>Scheduled calls</Typography>
           <Typography color="text.secondary">
             Schedule a call that plays a pre-generated message, asks one
             question, and best-effort captures the answer. No conversation, no

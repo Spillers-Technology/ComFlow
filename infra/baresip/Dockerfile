@@ -33,11 +33,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=build /usr/local /usr/local
 RUN ldconfig
+COPY config accounts.example /etc/baresip-defaults/
 
-# baresip reads its config + accounts from this directory.
-ENV BARESIP_PATH=/etc/baresip
+# baresip reads generated config + accounts from the shared data volume.
+ENV BARESIP_PATH=/data/baresip
 VOLUME ["/data"]
 EXPOSE 4444/tcp 5060/udp
 
-# -f: config dir, -t no TTY needed; ctrl_tcp drives everything.
-ENTRYPOINT ["baresip", "-f", "/etc/baresip"]
+# Seed the shared config directory on first boot. ComFlow updates
+# /data/baresip/accounts from the admin UI without baking secrets into the image.
+ENTRYPOINT ["/bin/sh", "-c", "mkdir -p /data/baresip /data/recordings-raw && cp -n /etc/baresip-defaults/config /data/baresip/config && cp -n /etc/baresip-defaults/accounts.example /data/baresip/accounts && exec baresip -f /data/baresip"]

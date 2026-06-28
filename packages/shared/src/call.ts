@@ -41,6 +41,8 @@ export const CallRecordSchema = z.object({
   telephonyCallId: z.string().nullable(),
   rawTranscript: z.string().nullable(),
   reviewedAt: z.string().nullable(),
+  // Snapshot of who moved the call to reviewed/assigned (display name or email).
+  reviewedBy: z.string().nullable(),
   syncedTicketId: z.string().nullable(),
   syncedTicketProvider: z.string().nullable(),
   syncedAt: z.string().nullable(),

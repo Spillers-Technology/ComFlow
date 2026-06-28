@@ -49,6 +49,57 @@ export const mailboxRepository = {
     return row ? mapRow(row) : null
   },
 
+  count(): number {
+    const row = db.prepare('SELECT COUNT(*) as count FROM mailboxes').get() as {
+      count: number
+    }
+    return row.count
+  },
+
+  getByNumber(number: string): Mailbox | null {
+    const row = db
+      .prepare('SELECT * FROM mailboxes WHERE number = ?')
+      .get(number) as MailboxRow | undefined
+    return row ? mapRow(row) : null
+  },
+
+  getBySipAccountRef(sipAccountRef: string): Mailbox | null {
+    const row = db
+      .prepare('SELECT * FROM mailboxes WHERE sip_account_ref = ?')
+      .get(sipAccountRef) as MailboxRow | undefined
+    return row ? mapRow(row) : null
+  },
+
+  create(input: {
+    name: string
+    number: string | null
+    sipAccountRef: string | null
+    greetingPromptId: string | null
+  }): Mailbox {
+    const now = new Date().toISOString()
+    const row: MailboxRow = {
+      id: randomUUID(),
+      name: input.name,
+      number: input.number,
+      greeting_prompt_id: input.greetingPromptId,
+      sip_account_ref: input.sipAccountRef,
+      created_at: now,
+      updated_at: now,
+    }
+    db.prepare(`
+      INSERT INTO mailboxes (
+        id, name, number, greeting_prompt_id, sip_account_ref, created_at, updated_at
+      )
+      VALUES (@id, @name, @number, @greeting_prompt_id, @sip_account_ref, @created_at, @updated_at)
+    `).run(row)
+    return mapRow(row)
+  },
+
+  remove(id: string): boolean {
+    const result = db.prepare('DELETE FROM mailboxes WHERE id = ?').run(id)
+    return result.changes > 0
+  },
+
   /** The single mailbox in the current model; the earliest-created one. */
   getDefault(): Mailbox | null {
     const row = db

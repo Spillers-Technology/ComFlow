@@ -32,6 +32,7 @@ type CallRow = {
   recording_path: string | null
   recording_mime_type: string | null
   reviewed_at: string | null
+  reviewed_by: string | null
   synced_ticket_id: string | null
   synced_ticket_provider: string | null
   synced_at: string | null
@@ -46,6 +47,9 @@ export type CallFilters = {
   intent?: CallIntent
   assignedQueue?: string
   q?: string
+  // RBAC scope: when present, only calls in these mailboxes are returned. An
+  // empty array intentionally matches nothing (a member granted no mailboxes).
+  mailboxIds?: string[]
 }
 
 export type CreateCallInput = {
@@ -76,6 +80,7 @@ function mapCall(row: CallRow): CallRecord {
     telephonyCallId: row.telephony_call_id,
     rawTranscript: row.raw_transcript,
     reviewedAt: row.reviewed_at,
+    reviewedBy: row.reviewed_by,
     syncedTicketId: row.synced_ticket_id,
     syncedTicketProvider: row.synced_ticket_provider,
     syncedAt: row.synced_at,
@@ -132,6 +137,7 @@ export const callRepository = {
       recording_path: null,
       recording_mime_type: null,
       reviewed_at: null,
+      reviewed_by: null,
       synced_ticket_id: null,
       synced_ticket_provider: null,
       synced_at: null,
@@ -186,6 +192,15 @@ export const callRepository = {
         coalesce(callback_number, '') LIKE ?
       )`)
       values.push(query, query, query, query)
+    }
+    if (filters.mailboxIds) {
+      if (filters.mailboxIds.length === 0) {
+        where.push('0 = 1')
+      } else {
+        const placeholders = filters.mailboxIds.map(() => '?').join(', ')
+        where.push(`mailbox_id IN (${placeholders})`)
+        values.push(...filters.mailboxIds)
+      }
     }
 
     const rows = db
@@ -263,15 +278,23 @@ export const callRepository = {
     return this.getById(id)!
   },
 
-  update(id: string, input: CallUpdateInput): CallRecord | null {
+  update(
+    id: string,
+    input: CallUpdateInput,
+    reviewerName?: string | null
+  ): CallRecord | null {
     const existing = this.getById(id)
     if (!existing) return null
 
     const nextStatus = input.status ?? existing.status
-    const reviewedAt =
-      !existing.reviewedAt && nextStatus !== 'new'
-        ? new Date().toISOString()
-        : existing.reviewedAt
+    const isFirstReview = !existing.reviewedAt && nextStatus !== 'new'
+    const reviewedAt = isFirstReview
+      ? new Date().toISOString()
+      : existing.reviewedAt
+    // Attribute the first review to the operator who performed it.
+    const reviewedBy = isFirstReview
+      ? reviewerName ?? existing.reviewedBy
+      : existing.reviewedBy
 
     db.prepare(`
       UPDATE calls
@@ -285,6 +308,7 @@ export const callRepository = {
         status = ?,
         assigned_queue = ?,
         reviewed_at = ?,
+        reviewed_by = ?,
         updated_at = ?
       WHERE id = ?
     `).run(
@@ -297,11 +321,19 @@ export const callRepository = {
       nextStatus,
       input.assignedQueue ?? existing.assignedQueue,
       reviewedAt,
+      reviewedBy,
       new Date().toISOString(),
       id
     )
 
     return this.getById(id)
+  },
+
+  /** Reassign every call in a mailbox (used when a mailbox is deleted). */
+  reassignMailbox(fromMailboxId: string, toMailboxId: string | null): void {
+    db.prepare(
+      'UPDATE calls SET mailbox_id = ?, updated_at = ? WHERE mailbox_id = ?'
+    ).run(toMailboxId, new Date().toISOString(), fromMailboxId)
   },
 
   markSynced(

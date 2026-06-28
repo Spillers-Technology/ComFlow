@@ -8,9 +8,9 @@ import { config } from '../config.js'
 import { createSilentWav } from '../lib/audio.js'
 import { HttpError } from '../lib/errors.js'
 import { callRepository } from '../repositories/callRepository.js'
-import { mailboxRepository } from '../repositories/mailboxRepository.js'
 import { EmailNotificationService } from './emailNotificationService.js'
 import { EngineService } from './engineService.js'
+import { MailboxService } from './mailboxService.js'
 
 function extensionForMimeType(mimeType: string): string {
   if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'mp3'
@@ -22,7 +22,8 @@ function extensionForMimeType(mimeType: string): string {
 export class CallIngestionService {
   constructor(
     private readonly engineService: EngineService,
-    private readonly emailNotificationService: EmailNotificationService
+    private readonly emailNotificationService: EmailNotificationService,
+    private readonly mailboxService: MailboxService = new MailboxService()
   ) {}
 
   async createInboundCall(input: InboundTelephonyWebhookInput) {
@@ -31,8 +32,11 @@ export class CallIngestionService {
       source: input.source,
       callbackNumber: input.fromNumber,
       transcript: input.transcript,
-      // Single-mailbox model today; every call lands in the default mailbox.
-      mailboxId: mailboxRepository.ensureDefault(config.defaultMailbox).id,
+      // Route by dialed DID / receiving SIP account, else the default mailbox.
+      mailboxId: this.mailboxService.resolveInbound({
+        toNumber: input.toNumber,
+        accountLabel: input.accountLabel,
+      }),
     })
 
     if (input.transcript) {
