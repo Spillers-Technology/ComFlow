@@ -15,7 +15,7 @@ call_local_timeout      120
 
 # --- Recording (sndfile auto-records each call to this directory) ---
 # ComFlow reads the resulting WAVs from the shared /data volume.
-record_path             /data/recordings-raw
+snd_path                /data/recordings-raw
 record_aufile           yes
 
 # --- RTP media ports (publish/forward these for media to flow) ---

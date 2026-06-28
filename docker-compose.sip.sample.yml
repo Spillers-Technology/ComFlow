@@ -1,0 +1,67 @@
+# Local production-ish SIP smoke test.
+#
+# Default mode seeds /data/baresip/accounts from infra/baresip/accounts.example
+# so the containers can start and prove ComFlow can reach baresip's ctrl_tcp
+# interface. For real SIP calls, save SIP settings in the ComFlow admin UI,
+# then restart the baresip service so it rereads the generated accounts file.
+
+services:
+  comflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.release
+    image: comflow-local:sip-sample
+    depends_on:
+      - baresip
+    ports:
+      - "3001:3001"
+    volumes:
+      - comflow-data:/data
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: "3001"
+      FRONTEND_ORIGIN: http://localhost:3001
+      COMFLOW_PUBLIC_URL: http://localhost:3001
+      COMFLOW_DATA_DIR: /data
+      COMFLOW_SEED_DEMO: "false"
+
+      COMFLOW_TELEPHONY: baresip
+      BARESIP_CTRL_HOST: baresip
+      BARESIP_CTRL_PORT: "4444"
+      BARESIP_ACCOUNTS_PATH: /data/baresip/accounts
+      COMFLOW_DEFAULT_MAILBOX_SIP_ACCOUNT_REF: ${COMFLOW_DEFAULT_MAILBOX_SIP_ACCOUNT_REF:-local-baresip}
+      COMFLOW_SIP_OUTBOUND_DOMAIN: ${COMFLOW_SIP_OUTBOUND_DOMAIN:-}
+
+      COMFLOW_DEFAULT_LLM_PROVIDER: ${COMFLOW_DEFAULT_LLM_PROVIDER:-fake}
+      COMFLOW_DEFAULT_STT_PROVIDER: ${COMFLOW_DEFAULT_STT_PROVIDER:-fake}
+      COMFLOW_DEFAULT_TTS_PROVIDER: ${COMFLOW_DEFAULT_TTS_PROVIDER:-fake}
+
+      COMFLOW_AUTH_REQUIRED: ${COMFLOW_AUTH_REQUIRED:-false}
+      AUTH_SESSION_SECRET: ${AUTH_SESSION_SECRET:-local-compose-change-me}
+      AUTH_LOCAL_ENABLED: ${AUTH_LOCAL_ENABLED:-true}
+      AUTH_ADMIN_EMAILS: ${AUTH_ADMIN_EMAILS:-}
+      # SSO — OIDC (Authentik-aligned); auto-enabled when issuer/client/redirect set.
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      # SSO — SAML 2.0; auto-enabled when entryPoint/issuer/cert/callback set.
+      SAML_ENTRY_POINT: ${SAML_ENTRY_POINT:-}
+      SAML_ISSUER: ${SAML_ISSUER:-comflow}
+      SAML_IDP_CERT: ${SAML_IDP_CERT:-}
+      SAML_CALLBACK_URL: ${SAML_CALLBACK_URL:-}
+
+  baresip:
+    build:
+      context: ./infra/baresip
+      dockerfile: Dockerfile
+    volumes:
+      - comflow-data:/data
+    ports:
+      - "5060:5060/udp"
+      - "16384-16584:16384-16584/udp"
+
+volumes:
+  comflow-data:

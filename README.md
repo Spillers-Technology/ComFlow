@@ -41,8 +41,9 @@ SIP source ──SIP/RTP──▶ baresip (SIP edge) ──ctrl_tcp──▶ Com
   spoken answer. No conversation, no answering-machine detection.
 - **Bring-your-own audio**: upload pre-recorded greetings (inbound) and
   message/question audio (outbound) instead of using TTS.
-- **Local accounts + admin config**: first-class local auth (open by default),
-  a configurable single mailbox + DID, and greeting management.
+- **Accounts, SSO & teams**: first-class local auth (open by default) plus
+  OIDC/SAML SSO; admins manage users, multiple mailboxes/DIDs, and groups that
+  grant per-mailbox visibility — all under Settings and Access.
 
 ## Repo layout
 
@@ -82,6 +83,27 @@ COMFLOW_TELEPHONY=baresip docker compose --profile sip up --build
 > see [infra/baresip/README.md](infra/baresip/README.md). ComFlow itself stays
 > telephony-protocol-free.
 
+For a production-ish local smoke test before Kubernetes, use the standalone SIP
+sample. By default it uses `infra/baresip/accounts.example`, which is enough to
+prove the ComFlow container can start and connect to baresip's `ctrl_tcp`
+interface, but it will not register a usable phone line:
+
+```bash
+docker compose -f docker-compose.sip.sample.yml up --build
+```
+
+For a real local SIP test, create the ignored credentials file and point the
+sample at it:
+
+```bash
+cp infra/baresip/accounts.example infra/baresip/accounts
+# edit infra/baresip/accounts with your provider/PBX registration
+BARESIP_ACCOUNTS_FILE=./infra/baresip/accounts docker compose -f docker-compose.sip.sample.yml up --build
+```
+
+The sample exposes the app at <http://localhost:3001> and publishes
+`5060/udp` plus `16384-16584/udp` for RTP media.
+
 Build + verify:
 
 ```bash
@@ -92,10 +114,20 @@ npm test --workspace @comflow/backend
 ## API surface
 
 Open: `GET /api/health`, `POST /api/auth/login`, `GET /api/auth/me`,
+`GET /api/auth/providers`, `GET /api/auth/sso/{provider}/start`,
+`GET /api/auth/oidc/callback`, `POST /api/auth/saml/acs`,
 `POST /api/webhooks/telephony/{inbound,recording-complete}`.
 
 Guarded (pass-through in open mode): `/api/calls*`, `/api/scheduled-calls*`,
 `/api/prompts*`, `/api/mailboxes*`, `/api/settings/*`.
+
+Admin-only: `/api/groups*` (RBAC group/membership/mailbox-grant management),
+`/api/users*` (local user create/role/password/delete), `/api/mailboxes` writes,
+`/api/settings/*`.
+
+Inbound calls route to a mailbox by dialed DID (`toNumber` → `mailboxes.number`),
+then receiving SIP account (`accountLabel` → `mailboxes.sipAccountRef`), else the
+default mailbox.
 
 ## Configuration
 
@@ -106,7 +138,7 @@ All env vars are documented in [.env.example](.env.example). Highlights:
   for local runs; Docker/Kubernetes-provided env still wins. Provider
   selections and admin-entered API-key overrides persist in SQLite.
 - **Mailbox**: `COMFLOW_DEFAULT_MAILBOX_{NAME,NUMBER,SIP_ACCOUNT_REF}` seeds
-  the first mailbox; later edits from the Connections admin page persist.
+  the first mailbox; later edits from the Settings → Mailboxes tab persist.
 - **Telephony**: `COMFLOW_TELEPHONY` (`fake`|`baresip`), `BARESIP_CTRL_*`,
   `COMFLOW_GREETING_PATH`, `COMFLOW_SIP_OUTBOUND_DOMAIN`, outbound timing.
 - **AnchorDesk**: `ANCHORDESK_SYNC_ENABLED`, `ANCHORDESK_BASE_URL`,
@@ -114,18 +146,29 @@ All env vars are documented in [.env.example](.env.example). Highlights:
 - **Email notifications**: `COMFLOW_EMAIL_NOTIFICATIONS_ENABLED`,
   `COMFLOW_SMTP_*`, `COMFLOW_NOTIFICATION_EMAIL_{FROM,TO}`. Defaults are
   local-Postfix friendly (`127.0.0.1:25`, no auth/TLS unless configured).
-- **Auth**: `COMFLOW_AUTH_REQUIRED` (default `false`), session secret/TTL,
-  `COMFLOW_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD}`.
+- **Auth**: `COMFLOW_AUTH_REQUIRED` (default `false`), `AUTH_SESSION_SECRET`/TTL,
+  `COMFLOW_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD}`, `AUTH_LOCAL_ENABLED`,
+  `AUTH_ADMIN_EMAILS` (promote-to-admin-on-SSO-login allowlist).
+- **SSO (M2)**: OIDC via `OIDC_{ISSUER_URL,CLIENT_ID,CLIENT_SECRET,REDIRECT_URI}`
+  (Authentik-aligned, auto-enabled when set) and SAML 2.0 via
+  `SAML_{ENTRY_POINT,ISSUER,IDP_CERT,CALLBACK_URL}`. Both provision users on first
+  login; IdP groups map onto ComFlow groups (Access page).
+- **RBAC (M3)**: groups grant **mailbox visibility**. Admins see/manage every
+  mailbox; members see only the calls/mailboxes their groups grant. Manage groups,
+  members, mailbox grants, and SSO group mappings on the **Access** admin page.
 
 ## Roadmap
 
-- **M1 (now)**: baresip SIP ingestion; tight scheduled-outbound; AnchorDesk sync;
+- **M1**: baresip SIP ingestion; tight scheduled-outbound; AnchorDesk sync;
   polished single inbox; audio-prompt uploads; local accounts + single
   mailbox/DID admin config.
-- **M2 — SSO**: OIDC / SAML 2.0 behind the same `AuthProvider` interface,
-  aligned with AnchorDesk's Authentik setup.
-- **M3 — Multi-mailbox & teams**: multiple DIDs/lines as multiple mailboxes
-  assigned to accounts; admin maps SIP connections → mailboxes → users.
+- **M2 — SSO** ✅: OIDC and SAML 2.0 behind the `SsoProvider` abstraction,
+  aligned with AnchorDesk's Authentik setup. Users provision on first login and
+  allowlisted emails (`AUTH_ADMIN_EMAILS`) are promoted to admin.
+- **M3 — Teams & RBAC** ✅: multiple mailboxes (one per DID/line); inbound calls
+  route to a mailbox by dialed DID / SIP account. Groups grant per-mailbox
+  visibility — members see only their granted mailboxes; admins manage users,
+  groups, mailboxes, and IdP-group mappings on the Access/Settings pages.
 
 ## Short version
 

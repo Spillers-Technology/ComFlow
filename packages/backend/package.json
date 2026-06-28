@@ -13,10 +13,12 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
     "@comflow/shared": "file:../shared",
+    "@node-saml/node-saml": "^5.1.0",
     "better-sqlite3": "^11.10.0",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "nodemailer": "^9.0.1",
+    "openid-client": "^6.8.4",
     "zod": "^4.1.11"
   },
   "devDependencies": {

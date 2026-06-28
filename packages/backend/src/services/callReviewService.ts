@@ -3,11 +3,18 @@ import {
   CallStatus,
   CallUpdateInput,
   CreateCallNoteInput,
+  User,
 } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
 import { callRepository, CallFilters } from '../repositories/callRepository.js'
 import { noteRepository } from '../repositories/noteRepository.js'
+import { accessService, ALL_MAILBOXES } from './accessService.js'
 import { AnchordeskSyncService } from './anchordeskSyncService.js'
+
+/** Human label for attribution; prefers the display name, falls back to email. */
+function displayName(user: User): string {
+  return user.displayName?.trim() || user.email
+}
 
 // A voicemail is "gilded" (worth syncing to AnchorDesk) once an operator has
 // reviewed or assigned it. New/resolved/spam are intentionally not synced.
@@ -21,13 +28,17 @@ export class CallReviewService {
     private readonly anchordeskSync: AnchordeskSyncService = new AnchordeskSyncService()
   ) {}
 
-  listCalls(filters: CallFilters) {
-    return callRepository.list(filters)
+  listCalls(filters: CallFilters, user: User) {
+    const scope = accessService.accessibleMailboxIds(user)
+    const scoped: CallFilters =
+      scope === ALL_MAILBOXES ? filters : { ...filters, mailboxIds: scope }
+    return callRepository.list(scoped)
   }
 
-  getCallDetail(id: string) {
+  getCallDetail(id: string, user: User) {
     const call = callRepository.getById(id)
-    if (!call) {
+    // 404 (not 403) for out-of-scope calls so we don't reveal their existence.
+    if (!call || !accessService.canAccessMailbox(user, call.mailboxId)) {
       throw new HttpError(404, 'Call not found.')
     }
 
@@ -37,8 +48,17 @@ export class CallReviewService {
     }
   }
 
-  async updateCall(id: string, input: CallUpdateInput): Promise<CallRecord> {
-    const call = callRepository.update(id, input)
+  async updateCall(
+    id: string,
+    input: CallUpdateInput,
+    user: User
+  ): Promise<CallRecord> {
+    const existing = callRepository.getById(id)
+    if (!existing || !accessService.canAccessMailbox(user, existing.mailboxId)) {
+      throw new HttpError(404, 'Call not found.')
+    }
+
+    const call = callRepository.update(id, input, displayName(user))
     if (!call) {
       throw new HttpError(404, 'Call not found.')
     }
@@ -65,12 +85,16 @@ export class CallReviewService {
     }
   }
 
-  addNote(callId: string, input: CreateCallNoteInput) {
+  addNote(callId: string, input: CreateCallNoteInput, user: User) {
     const call = callRepository.getById(callId)
-    if (!call) {
+    if (!call || !accessService.canAccessMailbox(user, call.mailboxId)) {
       throw new HttpError(404, 'Call not found.')
     }
 
-    return noteRepository.create(callId, input)
+    // Attribute the note to the signed-in operator unless one was supplied.
+    return noteRepository.create(callId, {
+      ...input,
+      authorName: input.authorName ?? displayName(user),
+    })
   }
 }

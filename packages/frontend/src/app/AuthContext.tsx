@@ -6,12 +6,15 @@ import {
   useMemo,
   useState,
 } from 'react'
-import { User } from '../../../shared/src/index.js'
+import { SsoProviderInfo, User } from '../../../shared/src/index.js'
 import { getMe, login as apiLogin, setToken } from '../lib/api'
 
 interface AuthState {
   user: User | null
   authRequired: boolean
+  localEnabled: boolean
+  providers: SsoProviderInfo[]
+  ssoError: string | null
   loading: boolean
   login: (email: string, password: string) => Promise<void>
   logout: () => void
@@ -19,9 +22,32 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null)
 
+/**
+ * After an SSO round-trip the backend redirects to `…/login#token=<token>`
+ * (or `#error=<message>`). Pull either out of the fragment and clear it so the
+ * token never lingers in the address bar or browser history.
+ */
+function consumeAuthHash(): { token: string | null; error: string | null } {
+  if (!window.location.hash) return { token: null, error: null }
+  const params = new URLSearchParams(window.location.hash.slice(1))
+  const token = params.get('token')
+  const error = params.get('error')
+  if (token || error) {
+    window.history.replaceState(
+      null,
+      '',
+      window.location.pathname + window.location.search
+    )
+  }
+  return { token, error }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [authRequired, setAuthRequired] = useState(false)
+  const [localEnabled, setLocalEnabled] = useState(true)
+  const [providers, setProviders] = useState<SsoProviderInfo[]>([])
+  const [ssoError, setSsoError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
@@ -29,6 +55,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const me = await getMe()
       setUser(me.user)
       setAuthRequired(me.authRequired)
+      setLocalEnabled(me.localEnabled)
+      setProviders(me.providers)
     } catch {
       setUser(null)
     } finally {
@@ -37,6 +65,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   useEffect(() => {
+    const { token, error } = consumeAuthHash()
+    if (token) setToken(token)
+    if (error) setSsoError(error)
     void refresh()
   }, [refresh])
 
@@ -55,8 +86,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ user, authRequired, loading, login, logout }),
-    [user, authRequired, loading, login, logout]
+    () => ({
+      user,
+      authRequired,
+      localEnabled,
+      providers,
+      ssoError,
+      loading,
+      login,
+      logout,
+    }),
+    [user, authRequired, localEnabled, providers, ssoError, loading, login, logout]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

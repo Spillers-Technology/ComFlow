@@ -1078,12 +1078,12 @@
           Accounts &amp; Admin
           <span class="pill pill-live" style="font-size:0.65rem; padding: 3px 9px;">Live</span>
         </div>
-        <div class="bento-desc">First-class local accounts behind a pluggable auth layer, plus an admin console to configure the mailbox.</div>
+        <div class="bento-desc">Local accounts <em>and</em> SSO (OIDC/SAML) behind one pluggable auth layer, plus role-based access: groups grant per-mailbox visibility to teams.</div>
         <div style="margin-top:14px;">
           <div class="metric-row"><span class="metric-label">Local login</span><span class="metric-val">Live</span></div>
           <div class="metric-row"><span class="metric-label">Mailbox + DID</span><span class="metric-val">Live</span></div>
-          <div class="metric-row"><span class="metric-label">Greeting upload</span><span class="metric-val">Live</span></div>
-          <div class="metric-row"><span class="metric-label">SSO (OIDC/SAML)</span><span class="metric-val" style="color:#a78bfa;">Roadmap</span></div>
+          <div class="metric-row"><span class="metric-label">SSO (OIDC/SAML)</span><span class="metric-val">Live</span></div>
+          <div class="metric-row"><span class="metric-label">Teams &amp; RBAC</span><span class="metric-val">Live</span></div>
         </div>
       </div>
 
@@ -1138,7 +1138,7 @@
       <div class="roadmap-label-block">
         <div class="section-label">Roadmap</div>
         <div class="roadmap-big"><span class="glow-text">Where we're</span><br>going.</div>
-        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">M1 ships the whole voicemail loop today. M2 adds self-serve signup, billing, and SSO; M3 opens it up to many mailboxes and teams. Each layer builds on the last — and stays in its lane.</p>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">M1 ships the whole voicemail loop today. M2 adds SSO (live) plus self-serve signup &amp; billing; M3 opens it up to many mailboxes and teams (live). Each layer builds on the last — and stays in its lane.</p>
       </div>
 
       <ul class="roadmap-list">
@@ -1226,17 +1226,17 @@
           <span class="roadmap-icon">🪪</span>
           <div class="roadmap-text">
             SSO — OIDC / SAML 2.0 <small>M2</small>
-            <small>Single sign-on behind the same pluggable auth interface</small>
+            <small>Single sign-on behind the same pluggable auth interface; users provision on first login</small>
           </div>
-          <span class="status-badge status-planned">Planned</span>
+          <span class="status-badge status-done">Done</span>
         </li>
         <li class="roadmap-item">
           <span class="roadmap-icon">📬</span>
           <div class="roadmap-text">
             Multi-mailbox &amp; teams <small>M3</small>
-            <small>Multiple DIDs / lines as mailboxes, mapped to accounts and teams</small>
+            <small>Multiple DIDs / lines as mailboxes; groups grant per-mailbox visibility to teams</small>
           </div>
-          <span class="status-badge status-planned">Planned</span>
+          <span class="status-badge status-done">Done</span>
         </li>
       </ul>
     </div>

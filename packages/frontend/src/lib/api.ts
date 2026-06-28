@@ -1,8 +1,13 @@
 import {
+  AuthProvidersResponseSchema,
   CreateAudioPromptRequest,
   CreateAudioPromptResponseSchema,
   CreateCallNoteInput,
   CreateCallNoteResponseSchema,
+  CreateGroupRequest,
+  CreateMailboxRequest,
+  CreateMailboxResponseSchema,
+  CreateUserRequest,
   CreateScheduledCallRequest,
   CreateScheduledCallResponseSchema,
   EngineTestResponseSchema,
@@ -12,15 +17,29 @@ import {
   GetCallsResponseSchema,
   GetMailboxesResponseSchema,
   GetScheduledCallsResponseSchema,
+  GetSipSettingsApiResponseSchema,
+  GetSipStatusApiResponseSchema,
+  GroupListResponseSchema,
+  GroupResponseSchema,
+  GroupUsersResponseSchema,
   LoginRequest,
   LoginResponseSchema,
   MeResponseSchema,
   PatchCallResponseSchema,
+  RestartSipApiResponseSchema,
   CallUpdateInput,
+  SsoGroupMapping,
+  SsoGroupMappingsResponseSchema,
   UpdateEngineSettingsRequest,
   UpdateEngineSettingsResponseSchema,
+  UpdateGroupRequest,
   UpdateMailboxRequest,
   UpdateMailboxResponseSchema,
+  UpdateUserRequest,
+  UpdateSipSettingsRequest,
+  UpdateSipSettingsApiResponseSchema,
+  UserListResponseSchema,
+  UserResponseSchema,
 } from '../../../shared/src/index.js'
 
 const TOKEN_KEY = 'comflow_token'
@@ -46,6 +65,16 @@ async function request<T>(input: RequestInfo, init: RequestInit, schema: {
     },
     ...init,
   })
+
+  // A 401 while holding a token means the session expired (vs. a fresh failed
+  // login, which carries no token). Clear it and bounce to the login screen.
+  if (response.status === 401 && token && input !== '/api/auth/login') {
+    setToken(null)
+    if (window.location.pathname !== '/login') {
+      window.location.assign('/login')
+    }
+    throw new Error('Your session has expired. Please sign in again.')
+  }
 
   const json = await response.json()
   if (!response.ok) {
@@ -121,6 +150,44 @@ export function testEngine(engine: 'llm' | 'stt' | 'tts') {
       body: JSON.stringify({}),
     },
     EngineTestResponseSchema
+  )
+}
+
+export function getSipSettings() {
+  return request(
+    '/api/settings/sip',
+    { method: 'GET' },
+    GetSipSettingsApiResponseSchema
+  )
+}
+
+export function updateSipSettings(payload: UpdateSipSettingsRequest) {
+  return request(
+    '/api/settings/sip',
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    },
+    UpdateSipSettingsApiResponseSchema
+  )
+}
+
+export function getSipStatus() {
+  return request(
+    '/api/settings/sip/status',
+    { method: 'GET' },
+    GetSipStatusApiResponseSchema
+  )
+}
+
+export function restartSipEdge() {
+  return request(
+    '/api/settings/sip/restart',
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+    },
+    RestartSipApiResponseSchema
   )
 }
 
@@ -227,6 +294,83 @@ export function getMe() {
   return request('/api/auth/me', { method: 'GET' }, MeResponseSchema)
 }
 
+export function getAuthProviders() {
+  return request(
+    '/api/auth/providers',
+    { method: 'GET' },
+    AuthProvidersResponseSchema
+  )
+}
+
+// --- RBAC: groups (admin only) ---
+
+export function getGroups() {
+  return request('/api/groups', { method: 'GET' }, GroupListResponseSchema)
+}
+
+export function getAssignableUsers() {
+  return request('/api/groups/users', { method: 'GET' }, GroupUsersResponseSchema)
+}
+
+export function createGroup(payload: CreateGroupRequest) {
+  return request(
+    '/api/groups',
+    { method: 'POST', body: JSON.stringify(payload) },
+    GroupResponseSchema
+  )
+}
+
+export function updateGroup(id: string, payload: UpdateGroupRequest) {
+  return request(
+    `/api/groups/${id}`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+    GroupResponseSchema
+  )
+}
+
+export async function deleteGroup(id: string) {
+  const token = getToken()
+  const response = await fetch(`/api/groups/${id}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!response.ok && response.status !== 204) {
+    throw new Error('Failed to delete group.')
+  }
+}
+
+export function setGroupMembers(id: string, userIds: string[]) {
+  return request(
+    `/api/groups/${id}/members`,
+    { method: 'PUT', body: JSON.stringify({ userIds }) },
+    GroupResponseSchema
+  )
+}
+
+export function setGroupMailboxes(id: string, mailboxIds: string[]) {
+  return request(
+    `/api/groups/${id}/mailboxes`,
+    { method: 'PUT', body: JSON.stringify({ mailboxIds }) },
+    GroupResponseSchema
+  )
+}
+
+export function getSsoGroupMappings() {
+  return request(
+    '/api/groups/mappings',
+    { method: 'GET' },
+    SsoGroupMappingsResponseSchema
+  )
+}
+
+export function setSsoGroupMappings(mappings: SsoGroupMapping[]) {
+  return request(
+    '/api/groups/mappings',
+    { method: 'PUT', body: JSON.stringify({ mappings }) },
+    SsoGroupMappingsResponseSchema
+  )
+}
+
 export function login(payload: LoginRequest) {
   return request(
     '/api/auth/login',
@@ -239,12 +383,97 @@ export function getMailboxes() {
   return request('/api/mailboxes', { method: 'GET' }, GetMailboxesResponseSchema)
 }
 
+export function createMailbox(payload: CreateMailboxRequest) {
+  return request(
+    '/api/mailboxes',
+    { method: 'POST', body: JSON.stringify(payload) },
+    CreateMailboxResponseSchema
+  )
+}
+
 export function updateMailbox(id: string, payload: UpdateMailboxRequest) {
   return request(
     `/api/mailboxes/${id}`,
     { method: 'PATCH', body: JSON.stringify(payload) },
     UpdateMailboxResponseSchema
   )
+}
+
+export async function deleteMailbox(id: string) {
+  const token = getToken()
+  const response = await fetch(`/api/mailboxes/${id}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!response.ok && response.status !== 204) {
+    let message = 'Failed to delete mailbox.'
+    try {
+      message = ((await response.json()) as { error?: string }).error ?? message
+    } catch {
+      // keep the generic message
+    }
+    throw new Error(message)
+  }
+}
+
+// --- Users (admin only) ---
+
+export function getUsers() {
+  return request('/api/users', { method: 'GET' }, UserListResponseSchema)
+}
+
+export function createUser(payload: CreateUserRequest) {
+  return request(
+    '/api/users',
+    { method: 'POST', body: JSON.stringify(payload) },
+    UserResponseSchema
+  )
+}
+
+export function updateUser(id: string, payload: UpdateUserRequest) {
+  return request(
+    `/api/users/${id}`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+    UserResponseSchema
+  )
+}
+
+export async function resetUserPassword(id: string, password: string) {
+  const token = getToken()
+  const response = await fetch(`/api/users/${id}/password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ password }),
+  })
+  if (!response.ok && response.status !== 204) {
+    let message = 'Failed to reset password.'
+    try {
+      message = ((await response.json()) as { error?: string }).error ?? message
+    } catch {
+      // keep the generic message
+    }
+    throw new Error(message)
+  }
+}
+
+export async function deleteUser(id: string) {
+  const token = getToken()
+  const response = await fetch(`/api/users/${id}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!response.ok && response.status !== 204) {
+    let message = 'Failed to delete user.'
+    try {
+      message = ((await response.json()) as { error?: string }).error ?? message
+    } catch {
+      // keep the generic message
+    }
+    throw new Error(message)
+  }
 }
 
 /** Read a File into the base64 string the prompt-upload endpoint expects. */

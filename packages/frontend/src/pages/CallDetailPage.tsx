@@ -187,7 +187,7 @@ function CallSummaryHeader({ call }: { call: CallRecord }) {
 
   return (
     <Stack spacing={1}>
-      <Typography variant="h3">
+      <Typography variant="h4" fontWeight={700}>
         {call.callerName ?? 'Unknown caller'}
       </Typography>
       <Typography color="text.secondary">
@@ -208,6 +208,11 @@ function CallSummaryHeader({ call }: { call: CallRecord }) {
           />
         )}
       </Stack>
+      {call.reviewedBy && (
+        <Typography variant="body2" color="text.secondary">
+          Reviewed by {call.reviewedBy}
+        </Typography>
+      )}
     </Stack>
   )
 }

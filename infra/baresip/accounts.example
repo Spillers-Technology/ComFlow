@@ -9,7 +9,8 @@
 #   ;outbound="sip:PROXY"    outbound proxy / SBC
 #   ;answermode=auto         auto-answer (mirrors sip_autoanswer in config)
 #   ;regint=600              re-registration interval (seconds)
-#   ;audio_codecs=opus,pcmu  preferred codecs
+#   ;audio_codecs=PCMU/8000/1,PCMA/8000/1,opus/48000/2
+#                            preferred codecs; use exact names baresip prints
 #
 # Example (replace with your real SIP provider / PBX account):
-<sip:1001@pbx.example.com>;auth_pass=CHANGE_ME;answermode=auto;regint=600;audio_codecs=opus,pcmu,pcma
+<sip:1001@pbx.example.com>;auth_pass=CHANGE_ME;answermode=auto;regint=600

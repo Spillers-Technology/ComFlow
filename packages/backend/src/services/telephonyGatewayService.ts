@@ -6,6 +6,7 @@ import {
   BaresipControlClient,
   BaresipEvent,
 } from '../providers/telephony/baresipControlClient.js'
+import { sipSettingsRepository } from '../repositories/sipSettingsRepository.js'
 import { AudioPromptService } from './audioPromptService.js'
 import { CallIngestionService } from './callIngestionService.js'
 
@@ -52,6 +53,15 @@ async function delay(ms: number) {
   return new Promise<void>(resolve => setTimeout(resolve, ms))
 }
 
+function getOutboundDialingDomain(): string | null {
+  const settings = sipSettingsRepository.get() ?? config.defaultSipSettings
+  if (settings.enabled && settings.outboundDialingDomain) {
+    return settings.outboundDialingDomain
+  }
+
+  return config.telephony.sipOutboundDomain
+}
+
 /**
  * Bridges a real SIP UA (baresip, the "SIP edge") to ComFlow's existing
  * ingestion pipeline. Inbound: answer -> play greeting -> let baresip's sndfile
@@ -67,7 +77,7 @@ export class TelephonyGatewayService {
   // Tracks inbound calls between CALL_ESTABLISHED and CALL_CLOSED.
   private readonly inbound = new Map<
     string,
-    { fromNumber: string; startedAt: number }
+    { fromNumber: string; toNumber: string | null; startedAt: number }
   >()
 
   constructor(
@@ -124,7 +134,13 @@ export class TelephonyGatewayService {
 
   private async handleIncoming(callId: string, event: BaresipEvent) {
     const fromNumber = extractNumberFromUri(event.peeruri)
-    this.inbound.set(callId, { fromNumber, startedAt: Date.now() })
+    // The called account's AOR carries the dialed DID in its user part; we use
+    // it as the inbound routing key (toNumber → mailboxes.number). Best-effort:
+    // when absent the call falls back to the default mailbox.
+    const toNumber = event.accountaor
+      ? extractNumberFromUri(event.accountaor)
+      : null
+    this.inbound.set(callId, { fromNumber, toNumber, startedAt: Date.now() })
 
     try {
       await this.client.command(CMD.accept)
@@ -167,6 +183,7 @@ export class TelephonyGatewayService {
         telephonyCallId,
         source: 'telephony',
         fromNumber: tracked.fromNumber,
+        toNumber: tracked.toNumber ?? undefined,
       })
 
       const recordingPath = await this.findRecordingSince(tracked.startedAt)
@@ -229,8 +246,9 @@ export class TelephonyGatewayService {
 
     const providerCallId = `baresip-out-${randomUUID()}`
     const startedAt = Date.now()
-    const dialUri = config.telephony.sipOutboundDomain
-      ? `sip:${request.toNumber}@${config.telephony.sipOutboundDomain}`
+    const outboundDialingDomain = getOutboundDialingDomain()
+    const dialUri = outboundDialingDomain
+      ? `sip:${request.toNumber}@${outboundDialingDomain}`
       : request.toNumber
 
     const established = this.waitForOutboundEstablished(

@@ -9,14 +9,19 @@ import {
   Chip,
   Container,
   Divider,
+  FormControlLabel,
   MenuItem,
   Stack,
+  Switch,
+  Tab,
+  Tabs,
   TextField,
   Typography,
 } from '@mui/material'
 import DeleteIcon from '@mui/icons-material/Delete'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import SaveIcon from '@mui/icons-material/Save'
+import { MailboxesTab } from '../components/MailboxesTab'
 import {
   EngineKind,
   EngineReadinessMap,
@@ -24,11 +29,18 @@ import {
   EngineSecretStatus,
   EngineSecretStatusMap,
   EngineSettings,
+  SipRuntimeStatus,
+  SipSecretStatusMap,
+  SipSettings,
 } from '../../../shared/src/index.js'
 import {
   getEngineSettings,
+  getSipSettings,
+  getSipStatus,
+  restartSipEdge,
   testEngine,
   updateEngineSettings,
+  updateSipSettings,
 } from '../lib/api'
 
 const PROVIDER_OPTIONS = {
@@ -116,6 +128,35 @@ const EMPTY_SECRET_STATUS: EngineSecretStatusMap = {
   },
 }
 
+const EMPTY_SIP_SETTINGS: SipSettings = {
+  enabled: false,
+  accountLabel: 'main',
+  accountUri: null,
+  authUsername: null,
+  outboundProxy: null,
+  outboundDialingDomain: null,
+  registrationInterval: 600,
+  preferredCodecs: [],
+}
+
+const EMPTY_SIP_SECRET_STATUS: SipSecretStatusMap = {
+  authPassword: {
+    configured: false,
+    source: 'missing',
+  },
+}
+
+const EMPTY_SIP_STATUS: SipRuntimeStatus = {
+  telephonyMode: 'fake',
+  controlHost: '127.0.0.1',
+  controlPort: 4444,
+  controlConnected: false,
+  accountsPath: '',
+  accountsLastWrittenAt: null,
+  restartSupported: false,
+  restartMechanism: 'unavailable',
+}
+
 const SECRET_FIELDS = [
   {
     key: 'openaiApiKey',
@@ -160,6 +201,13 @@ function getSecretPatch(inputs: SecretInputState) {
   return Object.keys(patch).length > 0 ? patch : undefined
 }
 
+function parsePreferredCodecs(value: string) {
+  return value
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean)
+}
+
 export function SettingsPage() {
   const [settings, setSettings] = useState<EngineSettings>(EMPTY_SETTINGS)
   const [readiness, setReadiness] = useState<EngineReadinessMap>(EMPTY_READINESS)
@@ -167,8 +215,19 @@ export function SettingsPage() {
     useState<EngineSecretStatusMap>(EMPTY_SECRET_STATUS)
   const [secretInputs, setSecretInputs] =
     useState<SecretInputState>(emptySecretInputs)
+  const [sipSettings, setSipSettings] =
+    useState<SipSettings>(EMPTY_SIP_SETTINGS)
+  const [sipSecrets, setSipSecrets] =
+    useState<SipSecretStatusMap>(EMPTY_SIP_SECRET_STATUS)
+  const [sipStatus, setSipStatus] =
+    useState<SipRuntimeStatus>(EMPTY_SIP_STATUS)
+  const [sipPasswordInput, setSipPasswordInput] = useState('')
+  const [preferredCodecsText, setPreferredCodecsText] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [savingSip, setSavingSip] = useState(false)
+  const [restartingSip, setRestartingSip] = useState(false)
+  const [tab, setTab] = useState(0)
   const [clearingSecret, setClearingSecret] = useState<EngineSecretKey | null>(
     null
   )
@@ -184,10 +243,17 @@ export function SettingsPage() {
   async function load() {
     setLoading(true)
     try {
-      const result = await getEngineSettings()
-      setSettings(result.settings)
-      setReadiness(result.readiness)
-      setSecrets(result.secrets)
+      const [engineResult, sipResult] = await Promise.all([
+        getEngineSettings(),
+        getSipSettings(),
+      ])
+      setSettings(engineResult.settings)
+      setReadiness(engineResult.readiness)
+      setSecrets(engineResult.secrets)
+      setSipSettings(sipResult.settings)
+      setSipSecrets(sipResult.secrets)
+      setSipStatus(sipResult.status)
+      setPreferredCodecsText(sipResult.settings.preferredCodecs.join(', '))
       setError(null)
     } catch (reason) {
       setError((reason as Error).message)
@@ -218,6 +284,59 @@ export function SettingsPage() {
       setError((reason as Error).message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleSaveSip() {
+    setSavingSip(true)
+    setNotice(null)
+    setError(null)
+
+    try {
+      const password = sipPasswordInput.trim()
+      const result = await updateSipSettings({
+        settings: sipSettings,
+        ...(password ? { secrets: { authPassword: password } } : {}),
+      })
+      setSipSettings(result.settings)
+      setSipSecrets(result.secrets)
+      setSipStatus(result.status)
+      setPreferredCodecsText(result.settings.preferredCodecs.join(', '))
+      if (password) setSipPasswordInput('')
+      setNotice('SIP settings saved and accounts file written.')
+    } catch (reason) {
+      setError((reason as Error).message)
+    } finally {
+      setSavingSip(false)
+    }
+  }
+
+  async function handleRestartSip() {
+    setRestartingSip(true)
+    setNotice(null)
+    setError(null)
+
+    try {
+      const result = await restartSipEdge()
+      setSipStatus(result.status)
+      setNotice(result.message)
+    } catch (reason) {
+      setError((reason as Error).message)
+    } finally {
+      setRestartingSip(false)
+    }
+  }
+
+  async function handleRefreshSipStatus() {
+    setNotice(null)
+    setError(null)
+
+    try {
+      const result = await getSipStatus()
+      setSipStatus(result.status)
+      setNotice('SIP control status refreshed.')
+    } catch (reason) {
+      setError((reason as Error).message)
     }
   }
 
@@ -270,16 +389,30 @@ export function SettingsPage() {
     <Container maxWidth="lg" sx={{ py: 4 }}>
       <Stack spacing={3}>
         <Box>
-          <Typography variant="h3">Engine settings</Typography>
+          <Typography variant="h4" fontWeight={700}>
+            Settings
+          </Typography>
           <Typography color="text.secondary">
-            Env defaults are used on first run. Saved admin values take over
-            after that.
+            Configure AI engines, the SIP/telephony edge, and mailboxes. Env
+            defaults apply on first run; saved values take over after that.
           </Typography>
         </Box>
 
         {error && <Alert severity="error">{error}</Alert>}
         {notice && <Alert severity="success">{notice}</Alert>}
 
+        <Tabs
+          value={tab}
+          onChange={(_, value) => setTab(value)}
+          sx={{ borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab label="Engines" />
+          <Tab label="Telephony" />
+          <Tab label="Mailboxes" />
+        </Tabs>
+
+        {tab === 0 && (
+          <>
         <Card>
           <CardHeader
             title="Providers"
@@ -464,8 +597,270 @@ export function SettingsPage() {
             Reload
           </Button>
         </Stack>
+          </>
+        )}
+
+        {tab === 1 && (
+          <SipSettingsEditor
+            settings={sipSettings}
+            secrets={sipSecrets}
+            status={sipStatus}
+            passwordValue={sipPasswordInput}
+            preferredCodecsText={preferredCodecsText}
+            disabled={loading || savingSip || restartingSip}
+            saving={savingSip}
+            restarting={restartingSip}
+            onSettingsChange={setSipSettings}
+            onPasswordChange={setSipPasswordInput}
+            onPreferredCodecsTextChange={value => {
+              setPreferredCodecsText(value)
+              setSipSettings(current => ({
+                ...current,
+                preferredCodecs: parsePreferredCodecs(value),
+              }))
+            }}
+            onSave={() => {
+              void handleSaveSip()
+            }}
+            onRestart={() => {
+              void handleRestartSip()
+            }}
+            onRefreshStatus={() => {
+              void handleRefreshSipStatus()
+            }}
+          />
+        )}
+
+        {tab === 2 && <MailboxesTab />}
       </Stack>
     </Container>
+  )
+}
+
+function SipSettingsEditor(props: {
+  settings: SipSettings
+  secrets: SipSecretStatusMap
+  status: SipRuntimeStatus
+  passwordValue: string
+  preferredCodecsText: string
+  disabled: boolean
+  saving: boolean
+  restarting: boolean
+  onSettingsChange: (update: (current: SipSettings) => SipSettings) => void
+  onPasswordChange: (value: string) => void
+  onPreferredCodecsTextChange: (value: string) => void
+  onSave: () => void
+  onRestart: () => void
+  onRefreshStatus: () => void
+}) {
+  const updateSettings = (patch: Partial<SipSettings>) => {
+    props.onSettingsChange(current => ({ ...current, ...patch }))
+  }
+  const passwordSource =
+    props.secrets.authPassword.source === 'env'
+      ? 'Env'
+      : props.secrets.authPassword.source === 'stored'
+        ? 'Saved'
+        : 'Missing'
+  const lastWritten = props.status.accountsLastWrittenAt
+    ? new Date(props.status.accountsLastWrittenAt).toLocaleString()
+    : 'Not written'
+
+  return (
+    <Card>
+      <CardHeader
+        title="SIP edge"
+        subheader="baresip account registration, control status, and generated accounts file."
+        action={
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Chip
+              label={props.status.telephonyMode}
+              color={props.status.telephonyMode === 'baresip' ? 'info' : 'default'}
+              variant="outlined"
+            />
+            <Chip
+              label={
+                props.status.controlConnected
+                  ? 'Control connected'
+                  : 'Control disconnected'
+              }
+              color={props.status.controlConnected ? 'success' : 'warning'}
+              variant="outlined"
+            />
+          </Stack>
+        }
+      />
+      <CardContent>
+        <Stack spacing={2}>
+          {props.status.telephonyMode === 'fake' && (
+            <Alert severity="warning">
+              Fake telephony mode is active; SIP settings are saved for the
+              baresip edge but calls still use fake telephony.
+            </Alert>
+          )}
+
+          {props.status.telephonyMode === 'baresip' &&
+            !props.status.controlConnected && (
+              <Alert severity="warning">
+                ComFlow is not connected to baresip ctrl at{' '}
+                {props.status.controlHost}:{props.status.controlPort}.
+              </Alert>
+            )}
+
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={props.settings.enabled}
+                  onChange={event =>
+                    updateSettings({ enabled: event.target.checked })
+                  }
+                  disabled={props.disabled}
+                />
+              }
+              label="SIP registration enabled"
+              sx={{ minWidth: 240 }}
+            />
+            <TextField
+              label="Account label"
+              value={props.settings.accountLabel}
+              onChange={event =>
+                updateSettings({ accountLabel: event.target.value })
+              }
+              disabled={props.disabled}
+              sx={{ minWidth: 220 }}
+            />
+            <TextField
+              label="SIP account URI"
+              value={props.settings.accountUri ?? ''}
+              onChange={event =>
+                updateSettings({ accountUri: event.target.value || null })
+              }
+              placeholder="sip:1001@pbx.example.com"
+              disabled={props.disabled}
+              fullWidth
+            />
+          </Stack>
+
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+            <TextField
+              label="Auth username"
+              value={props.settings.authUsername ?? ''}
+              onChange={event =>
+                updateSettings({ authUsername: event.target.value || null })
+              }
+              disabled={props.disabled}
+              fullWidth
+            />
+            <TextField
+              label="Auth password"
+              type="password"
+              autoComplete="off"
+              value={props.passwordValue}
+              onChange={event => props.onPasswordChange(event.target.value)}
+              placeholder="Leave blank to keep current password"
+              disabled={props.disabled}
+              fullWidth
+            />
+            <Chip
+              label={passwordSource}
+              color={props.secrets.authPassword.configured ? 'success' : 'warning'}
+              variant="outlined"
+              sx={{ alignSelf: { xs: 'flex-start', md: 'center' }, minWidth: 96 }}
+            />
+          </Stack>
+
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+            <TextField
+              label="Outbound proxy"
+              value={props.settings.outboundProxy ?? ''}
+              onChange={event =>
+                updateSettings({ outboundProxy: event.target.value || null })
+              }
+              placeholder="sip:sbc.example.com"
+              disabled={props.disabled}
+              fullWidth
+            />
+            <TextField
+              label="Outbound dialing domain"
+              value={props.settings.outboundDialingDomain ?? ''}
+              onChange={event =>
+                updateSettings({
+                  outboundDialingDomain: event.target.value || null,
+                })
+              }
+              placeholder="pbx.example.com"
+              disabled={props.disabled}
+              fullWidth
+            />
+          </Stack>
+
+          <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+            <TextField
+              label="Registration interval"
+              type="number"
+              value={props.settings.registrationInterval}
+              onChange={event =>
+                updateSettings({
+                  registrationInterval: Number(event.target.value || 600),
+                })
+              }
+              inputProps={{ min: 60, max: 86400 }}
+              disabled={props.disabled}
+              sx={{ minWidth: 220 }}
+            />
+            <TextField
+              label="Preferred codecs"
+              value={props.preferredCodecsText}
+              onChange={event =>
+                props.onPreferredCodecsTextChange(event.target.value)
+              }
+              placeholder="PCMU/8000/1, PCMA/8000/1, opus/48000/2"
+              disabled={props.disabled}
+              fullWidth
+            />
+          </Stack>
+
+          <Stack spacing={1}>
+            <Typography variant="body2" color="text.secondary">
+              Accounts file: {props.status.accountsPath || 'Not configured'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Last written: {lastWritten}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Restart: {props.status.restartSupported ? 'Supervisor' : 'Manual'}
+            </Typography>
+          </Stack>
+
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap>
+            <Button
+              variant="contained"
+              startIcon={<SaveIcon />}
+              onClick={props.onSave}
+              disabled={props.disabled}
+            >
+              {props.saving ? 'Saving...' : 'Save SIP'}
+            </Button>
+            <Button
+              variant="outlined"
+              startIcon={<RefreshIcon />}
+              onClick={props.onRestart}
+              disabled={props.disabled}
+            >
+              {props.restarting ? 'Restarting...' : 'Restart/reload edge'}
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={props.onRefreshStatus}
+              disabled={props.disabled}
+            >
+              Test control
+            </Button>
+          </Stack>
+        </Stack>
+      </CardContent>
+    </Card>
   )
 }
 
