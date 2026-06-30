@@ -9,6 +9,12 @@ It is deliberately **not** an AI receptionist. For full conversational
 call-handling, use [agentvoiceresponse](https://github.com/agentvoiceresponse).
 ComFlow stays in its lane: receive, process, present, integrate.
 
+Run it two ways: **bring your own SIP trunk and self-host** it for a single team
+(open or local-auth, nothing else required), or — new in **3.0** — **run it as a
+multi-tenant service** for others: provision DIDs on demand, meter usage, and bill
+each customer from a Stripe prepaid wallet behind a hard tenant boundary. See
+[Hosting it for others](#hosting-it-for-others-saas).
+
 ## How it works
 
 ```
@@ -189,17 +195,17 @@ All env vars are documented in [.env.example](.env.example). Highlights:
 - **Auth**: `COMFLOW_AUTH_REQUIRED` (default `false`), `AUTH_SESSION_SECRET`/TTL,
   `COMFLOW_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD}`, `AUTH_LOCAL_ENABLED`,
   `AUTH_ADMIN_EMAILS` (promote-to-admin-on-SSO-login allowlist).
-- **SSO (M2)**: OIDC via `OIDC_{ISSUER_URL,CLIENT_ID,CLIENT_SECRET,REDIRECT_URI}`
+- **SSO**: OIDC via `OIDC_{ISSUER_URL,CLIENT_ID,CLIENT_SECRET,REDIRECT_URI}`
   (Authentik-aligned, auto-enabled when set) and SAML 2.0 via
   `SAML_{ENTRY_POINT,ISSUER,IDP_CERT,CALLBACK_URL}`. Both provision users on first
   login; IdP groups map onto ComFlow groups (Access page).
-- **RBAC (M3)**: groups grant **mailbox visibility**. Admins see/manage every
+- **RBAC**: groups grant **mailbox visibility**. Admins see/manage every
   mailbox; members see only the calls/mailboxes their groups grant. Manage groups,
   members, mailbox grants, and SSO group mappings on the **Access** admin page.
 - **MCP/API keys**: create `cf_` keys on the Profile page. MCP requests to
   `/api/mcp` act as the key owner; member keys cannot call admin settings,
   group, user, or mailbox-write tools.
-- **Multi-tenant + hosted (3.0)**: `COMFLOW_AUTH_REQUIRED=true` for hosted mode;
+- **Multi-tenant + hosted**: `COMFLOW_AUTH_REQUIRED=true` for hosted mode;
   `COMFLOW_DEFAULT_TENANT_*` names the primary tenant; `COMFLOW_DEFAULT_*` plan
   limits (`MAX_DIDS`, `MAX_CONCURRENT`, `INCLUDED_MINUTES`, `MARKUP_BPS`) and
   `COMFLOW_TRUNK_CHANNELS` seed pricing/limits; `COMFLOW_COST_*` set raw

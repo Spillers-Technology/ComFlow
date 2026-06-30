@@ -267,10 +267,8 @@
       background: linear-gradient(135deg, var(--accent), var(--accent-2));
       display: flex;
       align-items: center;
-      justify-content: font-size;
-      font-size: 1rem;
-      align-items: center;
       justify-content: center;
+      font-size: 1rem;
     }
 
     .mockup-caller-name {
@@ -441,6 +439,7 @@
         "triage  triage  notes"
         "calendar sops   routing"
         "engines engines metrics"
+        "hosted  hosted  hosted"
         "now      now    now";
       gap: 16px;
     }
@@ -477,7 +476,47 @@
     .card-routing  { grid-area: routing; }
     .card-engines  { grid-area: engines; }
     .card-metrics  { grid-area: metrics; }
+    .card-hosted   { grid-area: hosted; }
     .card-now      { grid-area: now; }
+
+    .card-hosted {
+      background: linear-gradient(135deg, rgba(124,58,237,0.1) 0%, rgba(6,182,212,0.08) 100%);
+      border-color: rgba(124,58,237,0.3);
+    }
+    .card-hosted:hover {
+      border-color: rgba(124,58,237,0.55);
+      box-shadow: 0 0 32px rgba(124,58,237,0.16);
+    }
+
+    .hosted-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 18px;
+    }
+
+    .hosted-feat {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 16px 16px 18px;
+    }
+
+    .hosted-feat .hf-title {
+      font-family: 'Space Grotesk', sans-serif;
+      font-weight: 600;
+      font-size: 0.92rem;
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .hosted-feat .hf-desc {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      line-height: 1.55;
+    }
 
     .card-engines {
       background: linear-gradient(135deg, rgba(245,158,11,0.07) 0%, rgba(124,58,237,0.1) 100%);
@@ -854,8 +893,11 @@
           "sops     routing"
           "engines  engines"
           "metrics  metrics"
+          "hosted   hosted"
           "now      now";
       }
+
+      .hosted-grid { grid-template-columns: 1fr; }
 
       .card-now { grid-template-columns: 1fr; }
       .provider-grid { grid-template-columns: repeat(4, 1fr); }
@@ -894,6 +936,7 @@
           "routing"
           "engines"
           "metrics"
+          "hosted"
           "now";
       }
       .provider-grid { grid-template-columns: repeat(2, 1fr); }
@@ -913,7 +956,7 @@
       <a href="#how-it-works">How It Works</a>
       <a href="#roadmap">Roadmap</a>
       <a href="#access">Get Access</a>
-      <a href="https://github.com/spilloid/ComFlow" target="_blank" rel="noopener">GitHub ↗</a>
+      <a href="https://github.com/Spillers-Technology/ComFlow" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
   </div>
 </nav>
@@ -928,7 +971,7 @@
     <p class="hero-sub">ComFlow answers your calls over SIP, records the voicemail, transcribes and structures it, and gives your team a golden review inbox — plus tight scheduled outbound calling. <strong>Bring your own trunk and self-host</strong>, or <strong>email for a hosted account</strong> with a DID to forward your calls to. Not a receptionist — a voicemail regulator.</p>
     <div class="hero-actions">
       <a href="#access" class="btn btn-primary">Get Access →</a>
-      <a href="https://github.com/spilloid/ComFlow" target="_blank" rel="noopener" class="btn btn-ghost">
+      <a href="https://github.com/Spillers-Technology/ComFlow" target="_blank" rel="noopener" class="btn btn-ghost">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
         View on GitHub
       </a>
@@ -974,22 +1017,22 @@
     <span class="ticker-item"><span class="ticker-dot"></span>Transcribe &amp; Extract</span>
     <span class="ticker-item"><span class="ticker-dot"></span>Golden Review Inbox</span>
     <span class="ticker-item"><span class="ticker-dot"></span>AnchorDesk Ticket Sync</span>
-    <span class="ticker-item"><span class="ticker-dot"></span>Scheduled Outbound Calls</span>
-    <span class="ticker-item"><span class="ticker-dot"></span>Bring-Your-Own Audio</span>
+    <span class="ticker-item"><span class="ticker-dot"></span>Multi-Tenant Isolation</span>
+    <span class="ticker-item"><span class="ticker-dot"></span>On-Demand DID Provisioning</span>
+    <span class="ticker-item"><span class="ticker-dot"></span>Usage Metering + Prepaid Wallet</span>
+    <span class="ticker-item"><span class="ticker-dot"></span>Hosted MCP Endpoint</span>
     <span class="ticker-item"><span class="ticker-dot"></span>Pluggable LLM · STT · TTS</span>
     <span class="ticker-item"><span class="ticker-dot"></span>Self-Hosted &amp; Open Source</span>
-    <span class="ticker-item"><span class="ticker-dot"></span>baresip SIP Edge</span>
-    <span class="ticker-item"><span class="ticker-dot"></span>Profiles + MCP API Keys</span>
     <span class="ticker-item"><span class="ticker-dot"></span>SIP Voicemail Capture</span>
     <span class="ticker-item"><span class="ticker-dot"></span>Transcribe &amp; Extract</span>
     <span class="ticker-item"><span class="ticker-dot"></span>Golden Review Inbox</span>
     <span class="ticker-item"><span class="ticker-dot"></span>AnchorDesk Ticket Sync</span>
-    <span class="ticker-item"><span class="ticker-dot"></span>Scheduled Outbound Calls</span>
-    <span class="ticker-item"><span class="ticker-dot"></span>Bring-Your-Own Audio</span>
+    <span class="ticker-item"><span class="ticker-dot"></span>Multi-Tenant Isolation</span>
+    <span class="ticker-item"><span class="ticker-dot"></span>On-Demand DID Provisioning</span>
+    <span class="ticker-item"><span class="ticker-dot"></span>Usage Metering + Prepaid Wallet</span>
+    <span class="ticker-item"><span class="ticker-dot"></span>Hosted MCP Endpoint</span>
     <span class="ticker-item"><span class="ticker-dot"></span>Pluggable LLM · STT · TTS</span>
     <span class="ticker-item"><span class="ticker-dot"></span>Self-Hosted &amp; Open Source</span>
-    <span class="ticker-item"><span class="ticker-dot"></span>baresip SIP Edge</span>
-    <span class="ticker-item"><span class="ticker-dot"></span>Profiles + MCP API Keys</span>
   </div>
 </div>
 
@@ -1084,17 +1127,41 @@
           <div class="metric-row"><span class="metric-label">Mailbox + DID</span><span class="metric-val">Live</span></div>
           <div class="metric-row"><span class="metric-label">SSO (OIDC/SAML)</span><span class="metric-val">Live</span></div>
           <div class="metric-row"><span class="metric-label">Teams &amp; RBAC</span><span class="metric-val">Live</span></div>
+          <div class="metric-row"><span class="metric-label">Multi-tenant</span><span class="metric-val">Live</span></div>
           <div class="metric-row"><span class="metric-label">MCP endpoint</span><span class="metric-val">Live</span></div>
+        </div>
+      </div>
+
+      <!-- Hosted platform (3.0) — full width -->
+      <div class="bento-card card-hosted">
+        <div class="bento-title">
+          Run it as a service
+          <span class="pill pill-live" style="font-size:0.65rem; padding: 3px 9px;">New in 3.0</span>
+        </div>
+        <div class="bento-desc">One VoIP.ms account and one set of AI keys, many isolated customers. ComFlow 3.0 turns the self-hosted app into a multi-tenant platform — provision numbers, meter usage, and bill from a prepaid wallet, all behind a hard tenant boundary.</div>
+        <div class="hosted-grid">
+          <div class="hosted-feat">
+            <div class="hf-title">🏢 Multi-tenant isolation</div>
+            <div class="hf-desc">A hard <code>tenant_id</code> boundary keeps every customer's users, mailboxes, DIDs, and voicemails separate. A platform owner manages tenants and plans; each tenant gets its own admin.</div>
+          </div>
+          <div class="hosted-feat">
+            <div class="hf-title">☎️ On-demand DIDs</div>
+            <div class="hf-desc">Order numbers from VoIP.ms over its API and bind them to a tenant's mailbox — customers forward their line to the DID and it answers. A fake provider backs dev and tests.</div>
+          </div>
+          <div class="hosted-feat">
+            <div class="hf-title">💳 Metering + prepaid wallet</div>
+            <div class="hf-desc">Per-tenant metering of minutes, AI, and DID rental with transparent carrier-vs-charged pricing. Customers fund a Stripe wallet that usage draws down, with per-tenant limits and trunk caps.</div>
+          </div>
         </div>
       </div>
 
       <!-- Available NOW -->
       <div class="bento-card card-now">
         <div>
-          <span class="pill pill-live" style="margin-bottom: 14px; display: inline-flex;">⚡ Shipping today · v2.3.0</span>
-          <div class="now-headline">Receive. Process.<br><span class="glow-text">Present. Sync.</span></div>
+          <span class="pill pill-live" style="margin-bottom: 14px; display: inline-flex;">⚡ Shipping today · v3.0.0</span>
+          <div class="now-headline">Self-host it,<br><span class="glow-text">or host it for others.</span></div>
         </div>
-        <div class="now-desc">The whole loop is live and self-hosted: SIP capture → transcribe → extract → a golden review inbox → AnchorDesk. One container image, pluggable engines, your data on your hardware.</div>
+        <div class="now-desc">The whole loop is live: SIP capture → transcribe → extract → golden review inbox → AnchorDesk. Bring your own trunk and run it on your hardware, or stand it up as a multi-tenant service with DIDs, metering, and a prepaid wallet.</div>
         <div>
           <a href="#access" class="btn btn-primary" style="white-space:nowrap;">Get Access →</a>
         </div>
@@ -1139,7 +1206,7 @@
       <div class="roadmap-label-block">
         <div class="section-label">Roadmap</div>
         <div class="roadmap-big"><span class="glow-text">Where we're</span><br>going.</div>
-        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">M1 ships the whole voicemail loop today. M2 adds SSO (live) plus self-serve signup &amp; billing; M3 opens it up to many mailboxes and teams (live). Each layer builds on the last — and stays in its lane.</p>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">The whole voicemail loop is live today, and 3.0 turns it into a hosted, multi-tenant platform — DIDs, metering, and a prepaid wallet included. What's left is automating the front door: self-serve signup and an owner dashboard, without ever drifting out of ComFlow's lane.</p>
       </div>
 
       <ul class="roadmap-list">
@@ -1218,23 +1285,15 @@
         <li class="roadmap-item">
           <span class="roadmap-icon">🔑</span>
           <div class="roadmap-text">
-            Profile + MCP API keys <small>2.3</small>
+            Profile + MCP API keys
             <small>Self-service profile management and Streamable HTTP MCP access scoped by RBAC</small>
           </div>
           <span class="status-badge status-done">Done</span>
         </li>
         <li class="roadmap-item">
-          <span class="roadmap-icon">💳</span>
-          <div class="roadmap-text">
-            Self-serve signup &amp; billing <small>M2</small>
-            <small>Hosted registration, payment confirmation, and automatic local account creation</small>
-          </div>
-          <span class="status-badge status-planned">Planned</span>
-        </li>
-        <li class="roadmap-item">
           <span class="roadmap-icon">🪪</span>
           <div class="roadmap-text">
-            SSO — OIDC / SAML 2.0 <small>M2</small>
+            SSO — OIDC / SAML 2.0
             <small>Single sign-on behind the same pluggable auth interface; users provision on first login</small>
           </div>
           <span class="status-badge status-done">Done</span>
@@ -1242,10 +1301,50 @@
         <li class="roadmap-item">
           <span class="roadmap-icon">📬</span>
           <div class="roadmap-text">
-            Multi-mailbox &amp; teams <small>M3</small>
+            Multi-mailbox &amp; teams
             <small>Multiple DIDs / lines as mailboxes; groups grant per-mailbox visibility to teams</small>
           </div>
           <span class="status-badge status-done">Done</span>
+        </li>
+        <li class="roadmap-item">
+          <span class="roadmap-icon">🏢</span>
+          <div class="roadmap-text">
+            Multi-tenant + hosted mode <small>3.0</small>
+            <small>Hard tenant boundary isolates every customer; a platform owner manages tenants and plans</small>
+          </div>
+          <span class="status-badge status-done">Done</span>
+        </li>
+        <li class="roadmap-item">
+          <span class="roadmap-icon">☎️</span>
+          <div class="roadmap-text">
+            On-the-fly DID provisioning <small>3.0</small>
+            <small>Order numbers from VoIP.ms and bind them to a tenant's mailbox; fake provider for dev</small>
+          </div>
+          <span class="status-badge status-done">Done</span>
+        </li>
+        <li class="roadmap-item">
+          <span class="roadmap-icon">💳</span>
+          <div class="roadmap-text">
+            Usage metering + prepaid wallet <small>3.0</small>
+            <small>Per-tenant minute/AI/DID metering with transparent pricing, funded by a Stripe wallet</small>
+          </div>
+          <span class="status-badge status-done">Done</span>
+        </li>
+        <li class="roadmap-item">
+          <span class="roadmap-icon">📝</span>
+          <div class="roadmap-text">
+            Self-serve signup
+            <small>Hosted registration and automatic tenant + account creation, replacing the manual request</small>
+          </div>
+          <span class="status-badge status-planned">Planned</span>
+        </li>
+        <li class="roadmap-item">
+          <span class="roadmap-icon">📊</span>
+          <div class="roadmap-text">
+            Owner dashboard
+            <small>Graphical tenant, plan, and usage management — fully API-operable today</small>
+          </div>
+          <span class="status-badge status-planned">Planned</span>
         </li>
       </ul>
     </div>
@@ -1259,14 +1358,14 @@
       <div class="callout-phone">📨</div>
       <div class="callout-text">
         <h3>Want in? <span class="glow-text">Pre-register.</span></h3>
-        <p>ComFlow is hosted at <strong>com.spillerstech.us</strong>. Self-serve signup and billing are on the way; for now, send the registration template to <a href="mailto:support@spillerstech.us?subject=ComFlow%20registration%20request&amp;body=COMFLOW_ACCESS_REQUEST%0A%0AName%3A%0AAccount%20email%3A%0AOrganization%3A%0ACallback%20number%3A%0ABilling%20contact%20email%3A%0AUse%20case%3A%0APreferred%20start%20date%3A%0A%0ANotes%3A" style="color: var(--accent-2); text-decoration: underline;">support@spillerstech.us</a>. We use it to create the hosted account manually for now, and that same structured request is ready to become the automated account-creation trigger later.</p>
+        <p>ComFlow is hosted at <strong>com.spillerstech.us</strong> — an isolated tenant, a DID to forward your calls to, and a Stripe prepaid wallet that usage draws down. Self-serve signup is on the way; for now, send the registration template to <a href="mailto:support@spillerstech.us?subject=ComFlow%20registration%20request&amp;body=COMFLOW_ACCESS_REQUEST%0A%0AName%3A%0AAccount%20email%3A%0AOrganization%3A%0ACallback%20number%3A%0ABilling%20contact%20email%3A%0AUse%20case%3A%0APreferred%20start%20date%3A%0A%0ANotes%3A" style="color: var(--accent-2); text-decoration: underline;">support@spillerstech.us</a> and we'll provision the tenant. That same structured request is what the automated signup flow will consume later.</p>
       </div>
       <a href="mailto:support@spillerstech.us?subject=ComFlow%20registration%20request&amp;body=COMFLOW_ACCESS_REQUEST%0A%0AName%3A%0AAccount%20email%3A%0AOrganization%3A%0ACallback%20number%3A%0ABilling%20contact%20email%3A%0AUse%20case%3A%0APreferred%20start%20date%3A%0A%0ANotes%3A" class="btn btn-primary" style="white-space:nowrap; align-self: center;">Send signup request →</a>
     </div>
     <p style="text-align:center; color: var(--text-muted); font-size: 0.85rem; margin-top: 24px; line-height: 1.7;">
       Rather run your own? It's open source and ships as a single container:
-      <code style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 0.82rem;">docker pull ghcr.io/spilloid/comflow:latest</code>
-      · <a href="https://github.com/spilloid/ComFlow" target="_blank" rel="noopener" style="color: var(--accent-2);">self-host guide on GitHub ↗</a>
+      <code style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 0.82rem;">docker pull ghcr.io/spillers-technology/comflow:latest</code>
+      · <a href="https://github.com/Spillers-Technology/ComFlow" target="_blank" rel="noopener" style="color: var(--accent-2);">self-host guide on GitHub ↗</a>
     </p>
   </div>
 </section>
@@ -1276,7 +1375,7 @@
   <div class="container footer-inner">
     <div class="footer-logo">Com<span>Flow</span></div>
     <div class="footer-links">
-      <a href="https://github.com/spilloid/ComFlow" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/Spillers-Technology/ComFlow" target="_blank" rel="noopener">GitHub</a>
       <a href="#features">Features</a>
       <a href="#roadmap">Roadmap</a>
       <a href="#access">Get Access</a>
