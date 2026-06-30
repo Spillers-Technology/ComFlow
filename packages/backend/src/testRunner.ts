@@ -714,6 +714,75 @@ async function main() {
     assert.equal(mailboxRepository.getByNumber('+15550102000'), null)
   })
 
+  await runTest('usage metering aggregates with markup', async () => {
+    const { ensurePrimaryTenant } = await getModules()
+    const { UsageService } = await import('./services/usageService.js')
+    const { tenantLimitsRepository } = await import(
+      './repositories/tenantLimitsRepository.js'
+    )
+
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    tenantLimitsRepository.update(tenantId, { markupBps: 20000 }) // 2x
+    const usage = new UsageService()
+
+    usage.recordInboundMinutes(tenantId, 3, 'call-x') // 3 min @ 1c = 3c carrier
+    usage.recordVoicemailProcessing(tenantId, 'call-x') // stt + llm
+
+    const summary = usage.summary(tenantId)
+    const minutes = summary.lines.find(l => l.type === 'inbound_minute')!
+    assert.equal(minutes.carrierCents, 3)
+    assert.equal(minutes.billedCents, 6) // 2x markup
+    assert.ok(summary.totalBilledCents >= summary.totalCarrierCents)
+    assert.ok(summary.lines.some(l => l.type === 'stt'))
+    assert.equal(usage.minutesThisMonth(tenantId), 3)
+  })
+
+  await runTest('did limit blocks provisioning beyond the plan', async () => {
+    const { ensurePrimaryTenant } = await getModules()
+    const { DidProvisioningService } = await import(
+      './services/didProvisioningService.js'
+    )
+    const { FakeSipTrunkProvider } = await import('./providers/sip/fake.js')
+    const { tenantLimitsRepository } = await import(
+      './repositories/tenantLimitsRepository.js'
+    )
+
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    tenantLimitsRepository.update(tenantId, { maxDids: 1 })
+    const service = new DidProvisioningService(
+      new FakeSipTrunkProvider(['+15550109001', '+15550109002'])
+    )
+
+    await service.provision(tenantId, { number: '+15550109001' })
+    await assert.rejects(
+      () => service.provision(tenantId, { number: '+15550109002' }),
+      /DID limit reached/
+    )
+  })
+
+  await runTest('concurrency enforces per-tenant and trunk caps', async () => {
+    await getModules()
+    const { ConcurrencyService } = await import(
+      './services/concurrencyService.js'
+    )
+    const { tenantLimitsRepository } = await import(
+      './repositories/tenantLimitsRepository.js'
+    )
+    const { ensurePrimaryTenant } = await getModules()
+
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    tenantLimitsRepository.update(tenantId, { maxConcurrentCalls: 2 })
+    const concurrency = new ConcurrencyService()
+
+    assert.equal(concurrency.tryBegin(tenantId, 'c1'), true)
+    assert.equal(concurrency.tryBegin(tenantId, 'c2'), true)
+    assert.equal(concurrency.tryBegin(tenantId, 'c3'), false) // tenant cap
+    assert.equal(concurrency.activeForTenant(tenantId), 2)
+
+    concurrency.end('c1')
+    assert.equal(concurrency.tryBegin(tenantId, 'c3'), true) // freed a slot
+  })
+
   await runTest('requireAdmin blocks non-admins', async () => {
     const { requireAdmin } = await import('./middleware/requireAdmin.js')
 

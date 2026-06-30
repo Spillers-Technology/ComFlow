@@ -172,6 +172,32 @@ db.exec(`
     released_at TEXT
   );
 
+  -- Usage metering (3.0): one row per billable unit consumed by a tenant.
+  -- unit_cost_cents is the raw carrier/AI cost; billed_cents is what the tenant
+  -- is charged (carrier cost x the tenant's markup). Aggregated for the wallet
+  -- and the transparent usage breakdown.
+  CREATE TABLE IF NOT EXISTS usage_events (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    unit_cost_cents REAL NOT NULL,
+    billed_cents INTEGER NOT NULL,
+    call_id TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  -- Per-tenant limits + pricing. markup_bps is basis points over carrier cost
+  -- (15000 = 1.5x). A row is created lazily from config defaults.
+  CREATE TABLE IF NOT EXISTS tenant_limits (
+    tenant_id TEXT PRIMARY KEY,
+    max_concurrent_calls INTEGER NOT NULL,
+    max_dids INTEGER NOT NULL,
+    included_minutes INTEGER NOT NULL,
+    markup_bps INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   -- RBAC (M3): groups grant mailbox visibility. Admins see everything; members
   -- see only the mailboxes their groups grant.
   CREATE TABLE IF NOT EXISTS groups (
@@ -269,6 +295,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_calls_tenant ON calls(tenant_id);
   CREATE INDEX IF NOT EXISTS idx_mailboxes_tenant ON mailboxes(tenant_id);
   CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
+  CREATE INDEX IF NOT EXISTS idx_usage_tenant_created ON usage_events(tenant_id, created_at);
 `)
 
 /**

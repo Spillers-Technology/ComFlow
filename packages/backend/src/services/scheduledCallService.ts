@@ -13,6 +13,7 @@ import {
 import { AudioPromptService } from './audioPromptService.js'
 import { EngineService } from './engineService.js'
 import { TelephonyGatewayService } from './telephonyGatewayService.js'
+import { UsageService } from './usageService.js'
 
 function toApi(record: ScheduledCallRecord): ScheduledCall {
   // The repository's API shape already matches ScheduledCall; strip the
@@ -43,7 +44,8 @@ export class ScheduledCallService {
   constructor(
     private readonly engineService: EngineService,
     private readonly telephonyGateway: TelephonyGatewayService,
-    private readonly audioPromptService: AudioPromptService
+    private readonly audioPromptService: AudioPromptService,
+    private readonly usageService: UsageService = new UsageService()
   ) {}
 
   list(tenantId: string): ScheduledCall[] {
@@ -193,6 +195,21 @@ export class ScheduledCallService {
         answerRecordingPath: answerRelativePath,
         answerTranscript,
       })
+
+      // Meter the outbound call: TTS for each synthesized segment, the call
+      // minutes, and STT/LLM when an answer was captured.
+      const tenantId = scheduledCallRepository.tenantIdOf(record.id)
+      if (tenantId) {
+        this.usageService.recordTts(tenantId)
+        this.usageService.recordTts(tenantId)
+        this.usageService.recordOutboundMinutes(
+          tenantId,
+          config.telephony.outboundCaptureWindowSec / 60
+        )
+        if (answerTranscript) {
+          this.usageService.record(tenantId, 'stt', 1, config.usageCosts.sttCents)
+        }
+      }
     } catch (error) {
       scheduledCallRepository.update(record.id, {
         status: 'failed',

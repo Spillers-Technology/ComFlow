@@ -209,6 +209,24 @@ export const config = {
     name: readOptionalEnv('COMFLOW_DEFAULT_TENANT_NAME') ?? 'Primary',
     slug: readOptionalEnv('COMFLOW_DEFAULT_TENANT_SLUG') ?? 'primary',
   },
+  // Default per-tenant limits + pricing, applied when a tenant has no override.
+  // markupBps is basis points over carrier cost (15000 = 1.5x).
+  defaultTenantLimits: {
+    maxConcurrentCalls: Number(process.env.COMFLOW_DEFAULT_MAX_CONCURRENT ?? 3),
+    maxDids: Number(process.env.COMFLOW_DEFAULT_MAX_DIDS ?? 1),
+    includedMinutes: Number(process.env.COMFLOW_DEFAULT_INCLUDED_MINUTES ?? 0),
+    markupBps: Number(process.env.COMFLOW_DEFAULT_MARKUP_BPS ?? 15000),
+  },
+  // The whole-trunk concurrent-call ceiling (e.g. a 10-channel SIP trunk).
+  trunkConcurrentCallLimit: Number(process.env.COMFLOW_TRUNK_CHANNELS ?? 10),
+  // Raw carrier/AI unit costs in cents, used to meter usage. Owner-tunable.
+  usageCosts: {
+    inboundPerMinuteCents: Number(process.env.COMFLOW_COST_INBOUND_MIN ?? 1),
+    outboundPerMinuteCents: Number(process.env.COMFLOW_COST_OUTBOUND_MIN ?? 1),
+    sttCents: Number(process.env.COMFLOW_COST_STT ?? 1),
+    llmCents: Number(process.env.COMFLOW_COST_LLM ?? 1),
+    ttsCents: Number(process.env.COMFLOW_COST_TTS ?? 1),
+  },
   defaultMailbox: {
     name: readOptionalEnv('COMFLOW_DEFAULT_MAILBOX_NAME') ?? 'Main mailbox',
     number: readOptionalEnv('COMFLOW_DEFAULT_MAILBOX_NUMBER'),

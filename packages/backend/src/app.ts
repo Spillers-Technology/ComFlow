@@ -14,6 +14,8 @@ import { createMeRouter } from './routes/me.js'
 import { createPromptsRouter } from './routes/prompts.js'
 import { createScheduledCallsRouter } from './routes/scheduledCalls.js'
 import { createSettingsRouter } from './routes/settings.js'
+import { createTenantsRouter } from './routes/tenants.js'
+import { createUsageRouter } from './routes/usage.js'
 import { createUsersRouter } from './routes/users.js'
 import { createWebhookRouter } from './routes/webhooks.js'
 import { config } from './config.js'
@@ -30,6 +32,7 @@ import { BaresipManagementService } from './services/baresipManagementService.js
 import { CallIngestionService } from './services/callIngestionService.js'
 import { CallReviewService } from './services/callReviewService.js'
 import { DidProvisioningService } from './services/didProvisioningService.js'
+import { UsageService } from './services/usageService.js'
 import { EmailNotificationService } from './services/emailNotificationService.js'
 import { EngineService } from './services/engineService.js'
 import { MailboxService } from './services/mailboxService.js'
@@ -78,6 +81,7 @@ export function createApp() {
     audioPromptService
   )
   const didProvisioningService = new DidProvisioningService()
+  const usageService = new UsageService()
 
   function assertWithinDataDir(filePath: string, directory: string) {
     const resolvedFile = path.resolve(filePath)
@@ -371,6 +375,8 @@ export function createApp() {
   )
   app.use('/api/groups', requireAuth, requireAdmin, createGroupsRouter())
   app.use('/api/users', requireAuth, requireAdmin, createUsersRouter())
+  app.use('/api/usage', requireAuth, createUsageRouter(usageService))
+  app.use('/api/tenants', requireAuth, createTenantsRouter())
 
   // Serve the built frontend (production single-image deploy). API routes above
   // win; everything else falls back to the SPA entry point.

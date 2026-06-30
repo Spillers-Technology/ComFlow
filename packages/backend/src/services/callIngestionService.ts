@@ -11,6 +11,7 @@ import { callRepository } from '../repositories/callRepository.js'
 import { EmailNotificationService } from './emailNotificationService.js'
 import { EngineService } from './engineService.js'
 import { MailboxService } from './mailboxService.js'
+import { UsageService } from './usageService.js'
 
 function extensionForMimeType(mimeType: string): string {
   if (mimeType.includes('mpeg') || mimeType.includes('mp3')) return 'mp3'
@@ -23,7 +24,8 @@ export class CallIngestionService {
   constructor(
     private readonly engineService: EngineService,
     private readonly emailNotificationService: EmailNotificationService,
-    private readonly mailboxService: MailboxService = new MailboxService()
+    private readonly mailboxService: MailboxService = new MailboxService(),
+    private readonly usageService: UsageService = new UsageService()
   ) {}
 
   async createInboundCall(input: InboundTelephonyWebhookInput) {
@@ -56,6 +58,7 @@ export class CallIngestionService {
         recordingMimeType: call.recordingMimeType,
       })
 
+      this.usageService.recordVoicemailProcessing(routing.tenantId, call.id)
       void this.notifyProcessedVoicemail(processed)
       return processed
     }
@@ -115,6 +118,8 @@ export class CallIngestionService {
       recordingMimeType: input.mimeType,
     })
 
+    const tenantId = callRepository.tenantIdOf(call.id)
+    if (tenantId) this.usageService.recordVoicemailProcessing(tenantId, call.id)
     void this.notifyProcessedVoicemail(processed)
     return processed
   }

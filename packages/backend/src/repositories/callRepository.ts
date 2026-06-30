@@ -231,6 +231,14 @@ export const callRepository = {
     return row ? mapCall(row) : null
   },
 
+  /** The tenant a call belongs to, for metering and isolation checks. */
+  tenantIdOf(id: string): string | null {
+    const row = db
+      .prepare('SELECT tenant_id FROM calls WHERE id = ?')
+      .get(id) as { tenant_id: string | null } | undefined
+    return row?.tenant_id ?? null
+  },
+
   /** Tenant-scoped fetch: returns null if the call is outside the tenant. */
   getInTenant(id: string, tenantId: string): CallRecord | null {
     const row = db

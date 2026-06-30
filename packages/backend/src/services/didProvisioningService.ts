@@ -6,6 +6,7 @@ import {
 import { HttpError } from '../lib/errors.js'
 import { didRepository } from '../repositories/didRepository.js'
 import { mailboxRepository } from '../repositories/mailboxRepository.js'
+import { tenantLimitsRepository } from '../repositories/tenantLimitsRepository.js'
 import { createSipTrunkProvider, SipTrunkProvider } from '../providers/sip/index.js'
 
 /**
@@ -36,6 +37,15 @@ export class DidProvisioningService {
   ): Promise<ProvisionedDid> {
     if (didRepository.getByNumber(input.number)) {
       throw new HttpError(409, 'That number is already provisioned.')
+    }
+
+    // Enforce the tenant's DID allowance before incurring carrier cost.
+    const limits = tenantLimitsRepository.get(tenantId)
+    if (didRepository.countActiveForTenant(tenantId) >= limits.maxDids) {
+      throw new HttpError(
+        403,
+        `DID limit reached (${limits.maxDids}). Upgrade the plan to add more.`
+      )
     }
 
     // Resolve the target mailbox first so a provider failure leaves no orphan.
