@@ -20,6 +20,7 @@ type ScheduledCallRow = {
   provider_call_id: string | null
   attempts: number
   last_error: string | null
+  tenant_id: string | null
   created_at: string
   updated_at: string
 }
@@ -66,6 +67,7 @@ export const scheduledCallRepository = {
     questionText: string
     messagePromptId: string | null
     questionPromptId: string | null
+    tenantId: string
   }): ScheduledCallRecord {
     const now = new Date().toISOString()
     const row: ScheduledCallRow = {
@@ -82,6 +84,7 @@ export const scheduledCallRepository = {
       provider_call_id: null,
       attempts: 0,
       last_error: null,
+      tenant_id: input.tenantId,
       created_at: now,
       updated_at: now,
     }
@@ -91,23 +94,25 @@ export const scheduledCallRepository = {
         id, to_number, scheduled_at, message_text, question_text,
         message_prompt_id, question_prompt_id, status,
         answer_transcript, answer_recording_path, provider_call_id, attempts,
-        last_error, created_at, updated_at
+        last_error, tenant_id, created_at, updated_at
       )
       VALUES (
         @id, @to_number, @scheduled_at, @message_text, @question_text,
         @message_prompt_id, @question_prompt_id, @status,
         @answer_transcript, @answer_recording_path, @provider_call_id, @attempts,
-        @last_error, @created_at, @updated_at
+        @last_error, @tenant_id, @created_at, @updated_at
       )
     `).run(row)
 
     return mapRow(row)
   },
 
-  list(): ScheduledCallRecord[] {
+  list(tenantId: string): ScheduledCallRecord[] {
     const rows = db
-      .prepare('SELECT * FROM scheduled_calls ORDER BY datetime(scheduled_at) DESC')
-      .all() as ScheduledCallRow[]
+      .prepare(
+        'SELECT * FROM scheduled_calls WHERE tenant_id = ? ORDER BY datetime(scheduled_at) DESC'
+      )
+      .all(tenantId) as ScheduledCallRow[]
     return rows.map(mapRow)
   },
 
@@ -116,6 +121,14 @@ export const scheduledCallRepository = {
       .prepare('SELECT * FROM scheduled_calls WHERE id = ?')
       .get(id) as ScheduledCallRow | undefined
     return row ? mapRow(row) : null
+  },
+
+  /** The tenant a scheduled call belongs to, for isolation checks. */
+  tenantIdOf(id: string): string | null {
+    const row = db
+      .prepare('SELECT tenant_id FROM scheduled_calls WHERE id = ?')
+      .get(id) as { tenant_id: string | null } | undefined
+    return row?.tenant_id ?? null
   },
 
   /** Calls that are due now and still waiting to run. */

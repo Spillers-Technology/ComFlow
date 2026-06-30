@@ -4,18 +4,22 @@ import { theme } from './theme'
 import { AuthProvider, useAuth } from './AuthContext'
 import { AppShell } from '../components/AppShell'
 import { AccessPage } from '../pages/AccessPage'
+import { BillingUsagePage } from '../pages/BillingUsagePage'
 import { CallDetailPage } from '../pages/CallDetailPage'
 import { CallInboxPage } from '../pages/CallInboxPage'
 import { LoginPage } from '../pages/LoginPage'
 import { ProfilePage } from '../pages/ProfilePage'
 import { ScheduledCallsPage } from '../pages/ScheduledCallsPage'
 import { SettingsPage } from '../pages/SettingsPage'
+import { TenantsPage } from '../pages/TenantsPage'
 
 function AppGate() {
   const { user, authRequired, loading } = useAuth()
   // Open mode (auth not enforced) grants the synthetic admin full access, so
   // the admin UI should show there too — matching the backend's behavior.
-  const isAdmin = !authRequired || user?.role === 'admin'
+  const isAdmin =
+    !authRequired || user?.role === 'admin' || user?.role === 'owner'
+  const isOwner = !authRequired || user?.role === 'owner'
 
   if (loading) {
     return (
@@ -36,7 +40,12 @@ function AppGate() {
         <Route path="/calls" element={<CallInboxPage />} />
         <Route path="/calls/:id" element={<CallDetailPage />} />
         <Route path="/profile" element={<ProfilePage />} />
+        <Route path="/billing" element={<BillingUsagePage />} />
         <Route path="/scheduled-calls" element={<ScheduledCallsPage />} />
+        <Route
+          path="/tenants"
+          element={isOwner ? <TenantsPage /> : <Navigate to="/calls" replace />}
+        />
         {/* Connections was folded into the Settings → Mailboxes tab. */}
         <Route path="/connections" element={<Navigate to="/settings" replace />} />
         <Route

@@ -6,13 +6,16 @@ export const ALL_MAILBOXES = 'all' as const
 export type MailboxScope = typeof ALL_MAILBOXES | string[]
 
 /**
- * Resolves which mailboxes a user may see. Admins (and the open-mode synthetic
- * admin) see everything; members see only the union of mailboxes granted by the
- * groups they belong to. A member in no group sees nothing — the safe default.
+ * Resolves which mailboxes a user may see *within their tenant*. Tenant
+ * isolation is enforced separately at the repository layer; this layer answers
+ * the within-tenant RBAC question. Org-admins (and the platform owner, and the
+ * open-mode synthetic identity) see every mailbox in their tenant; members see
+ * only the union of mailboxes granted by their groups. A member in no group sees
+ * nothing — the safe default.
  */
 export const accessService = {
   accessibleMailboxIds(user: User): MailboxScope {
-    if (user.role === 'admin') return ALL_MAILBOXES
+    if (user.role === 'admin' || user.role === 'owner') return ALL_MAILBOXES
     return groupRepository.mailboxIdsForUser(user.id)
   },
 

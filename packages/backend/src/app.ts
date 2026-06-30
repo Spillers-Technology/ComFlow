@@ -5,7 +5,9 @@ import express, { NextFunction, Request, Response } from 'express'
 import { User } from '../../shared/src/index.js'
 import { createComflowMcpRouter } from '../../mcp/src/index.js'
 import { createAuthRouter } from './routes/auth.js'
+import { createBillingRouter } from './routes/billing.js'
 import { createCallsRouter } from './routes/calls.js'
+import { createDidsRouter } from './routes/dids.js'
 import { createGroupsRouter } from './routes/groups.js'
 import { createHealthRouter } from './routes/health.js'
 import { createMailboxesRouter } from './routes/mailboxes.js'
@@ -13,9 +15,12 @@ import { createMeRouter } from './routes/me.js'
 import { createPromptsRouter } from './routes/prompts.js'
 import { createScheduledCallsRouter } from './routes/scheduledCalls.js'
 import { createSettingsRouter } from './routes/settings.js'
+import { createTenantsRouter } from './routes/tenants.js'
+import { createUsageRouter } from './routes/usage.js'
 import { createUsersRouter } from './routes/users.js'
 import { createWebhookRouter } from './routes/webhooks.js'
 import { config } from './config.js'
+import { ensurePrimaryTenant } from './db/client.js'
 import { HttpError } from './lib/errors.js'
 import { hashPassword } from './lib/password.js'
 import { requireAdmin } from './middleware/requireAdmin.js'
@@ -26,7 +31,10 @@ import { AudioPromptService } from './services/audioPromptService.js'
 import { AuthService } from './services/authService.js'
 import { BaresipManagementService } from './services/baresipManagementService.js'
 import { CallIngestionService } from './services/callIngestionService.js'
+import { BillingService } from './services/billingService.js'
 import { CallReviewService } from './services/callReviewService.js'
+import { DidProvisioningService } from './services/didProvisioningService.js'
+import { UsageService } from './services/usageService.js'
 import { EmailNotificationService } from './services/emailNotificationService.js'
 import { EngineService } from './services/engineService.js'
 import { MailboxService } from './services/mailboxService.js'
@@ -53,8 +61,11 @@ export function createApp() {
   const authService = new AuthService()
   const ssoService = new SsoService()
   const mailboxService = new MailboxService()
+  // Ensure the primary tenant exists and back-fill pre-tenancy rows onto it,
+  // then bootstrap the owner + that tenant's default mailbox.
+  const primaryTenantId = ensurePrimaryTenant(config.defaultTenant)
   authService.bootstrap()
-  mailboxService.getDefault()
+  mailboxService.getDefault(primaryTenantId)
 
   // Real SIP edge: connect to baresip and drive answer/record/ingest directly.
   // In 'fake' mode the webhook endpoints remain the ingestion path.
@@ -71,6 +82,9 @@ export function createApp() {
     telephonyGateway,
     audioPromptService
   )
+  const didProvisioningService = new DidProvisioningService()
+  const usageService = new UsageService()
+  const billingService = new BillingService()
 
   function assertWithinDataDir(filePath: string, directory: string) {
     const resolvedFile = path.resolve(filePath)
@@ -109,40 +123,43 @@ export function createApp() {
       },
     },
     scheduledCalls: {
-      list() {
-        return scheduledCallService.list()
+      list(user) {
+        return scheduledCallService.list(user.tenantId)
       },
-      create(input) {
-        return scheduledCallService.create(input as never)
+      create(user, input) {
+        return scheduledCallService.create(input as never, user.tenantId)
       },
-      cancel(id) {
-        return scheduledCallService.cancel(id)
+      cancel(user, id) {
+        return scheduledCallService.cancel(id, user.tenantId)
       },
     },
     prompts: {
-      list(kind) {
-        return audioPromptService.list(kind)
+      list(user, kind) {
+        return audioPromptService.list(user.tenantId, kind)
       },
-      upload(input) {
-        return audioPromptService.create(input as never)
+      upload(user, input) {
+        return audioPromptService.create(input as never, user.tenantId)
       },
-      delete(id) {
-        return audioPromptService.delete(id)
+      delete(user, id) {
+        return audioPromptService.delete(id, user.tenantId)
       },
     },
     mailboxes: {
       list(user) {
-        mailboxService.getDefault()
-        return accessService.filterMailboxes(user, mailboxService.list())
+        mailboxService.getDefault(user.tenantId)
+        return accessService.filterMailboxes(
+          user,
+          mailboxService.list(user.tenantId)
+        )
       },
-      create(input) {
-        return mailboxService.create(input as never)
+      create(user, input) {
+        return mailboxService.create(input as never, user.tenantId)
       },
-      update(id, input) {
-        return mailboxService.update(id, input as never)
+      update(user, id, input) {
+        return mailboxService.update(id, input as never, user.tenantId)
       },
-      delete(id) {
-        mailboxService.remove(id)
+      delete(user, id) {
+        mailboxService.remove(id, user.tenantId)
       },
     },
     settings: {
@@ -164,10 +181,10 @@ export function createApp() {
       },
     },
     users: {
-      list() {
-        return userRepository.list().map(toApiUser)
+      list(user) {
+        return userRepository.list(user.tenantId).map(toApiUser)
       },
-      create(input) {
+      create(user, input) {
         const userInput = input as {
           email: string
           displayName?: string | null
@@ -183,71 +200,107 @@ export function createApp() {
             displayName: userInput.displayName ?? null,
             passwordHash: hashPassword(userInput.password),
             role: userInput.role,
+            tenantId: user.tenantId,
           })
         )
       },
-      update(id, input) {
+      update(user, id, input) {
         const patch = input as { displayName?: string | null; role?: User['role'] }
         const existing = userRepository.getById(id)
-        if (!existing) throw new HttpError(404, 'User not found.')
+        if (!existing || existing.tenantId !== user.tenantId) {
+          throw new HttpError(404, 'User not found.')
+        }
         if (
           patch.role === 'member' &&
           existing.role === 'admin' &&
-          userRepository.countAdmins() <= 1
+          userRepository.countAdmins(user.tenantId) <= 1
         ) {
           throw new HttpError(400, 'Cannot demote the last administrator.')
         }
         return toApiUser(userRepository.update(id, patch)!)
       },
-      resetPassword(id, password) {
-        if (!userRepository.getById(id)) throw new HttpError(404, 'User not found.')
+      resetPassword(user, id, password) {
+        const existing = userRepository.getById(id)
+        if (!existing || existing.tenantId !== user.tenantId) {
+          throw new HttpError(404, 'User not found.')
+        }
         userRepository.setPassword(id, hashPassword(password))
       },
       delete(id, currentUser) {
         const existing = userRepository.getById(id)
-        if (!existing) throw new HttpError(404, 'User not found.')
+        if (!existing || existing.tenantId !== currentUser.tenantId) {
+          throw new HttpError(404, 'User not found.')
+        }
         if (currentUser.id === id) {
           throw new HttpError(400, 'You cannot delete your own account.')
         }
-        if (existing.role === 'admin' && userRepository.countAdmins() <= 1) {
+        if (
+          existing.role === 'admin' &&
+          userRepository.countAdmins(currentUser.tenantId) <= 1
+        ) {
           throw new HttpError(400, 'Cannot delete the last administrator.')
         }
         userRepository.remove(id)
       },
     },
     groups: {
-      list() {
-        return groupRepository.listDetail()
+      list(user) {
+        return groupRepository.listDetail(user.tenantId)
       },
-      create(input) {
-        const group = groupRepository.create(input as never)
+      create(user, input) {
+        const group = groupRepository.create({
+          ...(input as { name: string; description?: string | null }),
+          tenantId: user.tenantId,
+        })
         return groupRepository.getDetail(group.id)
       },
-      update(id, input) {
+      update(user, id, input) {
+        if (groupRepository.tenantIdOf(id) !== user.tenantId) {
+          throw new HttpError(404, 'Group not found.')
+        }
         const group = groupRepository.update(id, input as never)
         if (!group) throw new HttpError(404, 'Group not found.')
         return groupRepository.getDetail(id)
       },
-      delete(id) {
+      delete(user, id) {
+        if (groupRepository.tenantIdOf(id) !== user.tenantId) {
+          throw new HttpError(404, 'Group not found.')
+        }
         if (!groupRepository.remove(id)) {
           throw new HttpError(404, 'Group not found.')
         }
       },
-      setMembers(id, userIds) {
-        if (!groupRepository.getById(id)) throw new HttpError(404, 'Group not found.')
-        groupRepository.setMembers(id, userIds)
+      setMembers(user, id, userIds) {
+        if (groupRepository.tenantIdOf(id) !== user.tenantId) {
+          throw new HttpError(404, 'Group not found.')
+        }
+        const allowed = new Set(
+          userRepository.list(user.tenantId).map(member => member.id)
+        )
+        groupRepository.setMembers(
+          id,
+          userIds.filter(userId => allowed.has(userId))
+        )
         return groupRepository.getDetail(id)
       },
-      setMailboxes(id, mailboxIds) {
-        if (!groupRepository.getById(id)) throw new HttpError(404, 'Group not found.')
-        groupRepository.setMailboxes(id, mailboxIds)
+      setMailboxes(user, id, mailboxIds) {
+        if (groupRepository.tenantIdOf(id) !== user.tenantId) {
+          throw new HttpError(404, 'Group not found.')
+        }
+        const allowed = new Set(
+          mailboxService.list(user.tenantId).map(mailbox => mailbox.id)
+        )
+        groupRepository.setMailboxes(
+          id,
+          mailboxIds.filter(mailboxId => allowed.has(mailboxId))
+        )
         return groupRepository.getDetail(id)
       },
     },
     recordings: {
       list(user) {
         return callRepository
-          .list({})
+          .list({ tenantId: user.tenantId })
           .map(call => callRepository.getById(call.id))
           .filter(call => Boolean(call))
           .filter(call => accessService.canAccessMailbox(user, call!.mailboxId))
@@ -283,14 +336,38 @@ export function createApp() {
   }
 
   if (config.seedDemo) {
-    seedFakeData()
+    seedFakeData(primaryTenantId)
   }
+
+  // Charge each active DID's monthly rental (idempotent per number per month),
+  // now and once a day, so wallets reflect rental between usage-page reads.
+  usageService.sweepDidRentals()
+  setInterval(() => usageService.sweepDidRentals(), 24 * 60 * 60 * 1000).unref()
 
   app.use(
     cors({
       origin: config.frontendOrigin,
     })
   )
+
+  // Stripe webhook needs the raw body for signature verification, so it is
+  // mounted before the JSON body parser.
+  app.post(
+    '/api/webhooks/stripe',
+    express.raw({ type: '*/*' }),
+    (request, response) => {
+      try {
+        billingService.handleWebhook(
+          request.body as Buffer,
+          request.headers['stripe-signature'] as string | undefined
+        )
+        response.json({ received: true })
+      } catch (error) {
+        response.status(400).json({ error: (error as Error).message })
+      }
+    }
+  )
+
   app.use(express.json({ limit: '10mb' }))
 
   // Open endpoints: health, auth, and webhooks (machine-to-machine).
@@ -318,8 +395,16 @@ export function createApp() {
     createScheduledCallsRouter(scheduledCallService)
   )
   app.use('/api/mailboxes', requireAuth, createMailboxesRouter(mailboxService))
+  app.use(
+    '/api/dids',
+    requireAuth,
+    createDidsRouter(didProvisioningService)
+  )
   app.use('/api/groups', requireAuth, requireAdmin, createGroupsRouter())
   app.use('/api/users', requireAuth, requireAdmin, createUsersRouter())
+  app.use('/api/usage', requireAuth, createUsageRouter(usageService))
+  app.use('/api/billing', requireAuth, createBillingRouter(billingService))
+  app.use('/api/tenants', requireAuth, createTenantsRouter())
 
   // Serve the built frontend (production single-image deploy). API routes above
   // win; everything else falls back to the SPA entry point.

@@ -36,12 +36,12 @@ process.env.COMFLOW_SIP_AUTH_PASSWORD = ''
 process.env.AUTH_ADMIN_EMAILS = 'boss@example.com'
 
 async function getModules() {
-  const [{ createApp }, { db }] = await Promise.all([
+  const [{ createApp }, { db, ensurePrimaryTenant }] = await Promise.all([
     import('./app.js'),
     import('./db/client.js'),
   ])
 
-  return { createApp, db }
+  return { createApp, db, ensurePrimaryTenant }
 }
 
 async function resetDb() {
@@ -531,7 +531,7 @@ async function main() {
   })
 
   await runTest('rbac scopes mailbox access and call lists', async () => {
-    const { db } = await getModules()
+    const { db, ensurePrimaryTenant } = await getModules()
     const { userRepository } = await import('./repositories/userRepository.js')
     const { groupRepository } = await import('./repositories/groupRepository.js')
     const { callRepository } = await import('./repositories/callRepository.js')
@@ -540,28 +540,31 @@ async function main() {
     )
     const { CallReviewService } = await import('./services/callReviewService.js')
 
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
     const now = new Date().toISOString()
     const insertMailbox = db.prepare(`
-      INSERT INTO mailboxes (id, name, number, greeting_prompt_id, sip_account_ref, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO mailboxes (id, name, number, greeting_prompt_id, sip_account_ref, tenant_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
-    insertMailbox.run('mb-a', 'Mailbox A', null, null, null, now, now)
-    insertMailbox.run('mb-b', 'Mailbox B', null, null, null, now, now)
+    insertMailbox.run('mb-a', 'Mailbox A', null, null, null, tenantId, now, now)
+    insertMailbox.run('mb-b', 'Mailbox B', null, null, null, tenantId, now, now)
 
     const admin = userRepository.create({
       email: 'admin@example.com',
       displayName: 'Admin',
       passwordHash: null,
       role: 'admin',
+      tenantId,
     })
     const member = userRepository.create({
       email: 'member@example.com',
       displayName: 'Member',
       passwordHash: null,
       role: 'member',
+      tenantId,
     })
 
-    const group = groupRepository.create({ name: 'Team A' })
+    const group = groupRepository.create({ name: 'Team A', tenantId })
     groupRepository.setMailboxes(group.id, ['mb-a'])
     groupRepository.setMembers(group.id, [member.id])
 
@@ -573,12 +576,14 @@ async function main() {
       source: 'fake',
       callbackNumber: null,
       mailboxId: 'mb-a',
+      tenantId,
     })
     callRepository.createInitial({
       telephonyCallId: 'c-b',
       source: 'fake',
       callbackNumber: null,
       mailboxId: 'mb-b',
+      tenantId,
     })
 
     const service = new CallReviewService()
@@ -595,6 +600,258 @@ async function main() {
       () => service.getCallDetail(callB.id, member),
       /Call not found/
     )
+  })
+
+  await runTest('tenant isolation hides another tenant\'s calls', async () => {
+    const { db, ensurePrimaryTenant } = await getModules()
+    const { tenantRepository } = await import(
+      './repositories/tenantRepository.js'
+    )
+    const { userRepository } = await import('./repositories/userRepository.js')
+    const { callRepository } = await import('./repositories/callRepository.js')
+    const { CallReviewService } = await import('./services/callReviewService.js')
+
+    const tenantA = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    const tenantB = tenantRepository.create({ name: 'Acme', slug: 'acme' }).id
+
+    const now = new Date().toISOString()
+    const insertMailbox = db.prepare(`
+      INSERT INTO mailboxes (id, name, number, greeting_prompt_id, sip_account_ref, tenant_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    insertMailbox.run('mb-a', 'A', null, null, null, tenantA, now, now)
+    insertMailbox.run('mb-b', 'B', null, null, null, tenantB, now, now)
+
+    // Each tenant's admin sees only their own mailbox's calls.
+    const adminA = userRepository.create({
+      email: 'a-admin@example.com',
+      displayName: 'A',
+      passwordHash: null,
+      role: 'admin',
+      tenantId: tenantA,
+    })
+    const adminB = userRepository.create({
+      email: 'b-admin@example.com',
+      displayName: 'B',
+      passwordHash: null,
+      role: 'admin',
+      tenantId: tenantB,
+    })
+
+    const callA = callRepository.createInitial({
+      telephonyCallId: 'iso-a',
+      source: 'fake',
+      callbackNumber: null,
+      mailboxId: 'mb-a',
+      tenantId: tenantA,
+    })
+    const callB = callRepository.createInitial({
+      telephonyCallId: 'iso-b',
+      source: 'fake',
+      callbackNumber: null,
+      mailboxId: 'mb-b',
+      tenantId: tenantB,
+    })
+
+    const service = new CallReviewService()
+    assert.deepEqual(
+      service.listCalls({}, adminA).map(call => call.id),
+      [callA.id]
+    )
+    assert.deepEqual(
+      service.listCalls({}, adminB).map(call => call.id),
+      [callB.id]
+    )
+    // Admin A cannot open tenant B's call — 404, not a leak.
+    assert.throws(
+      () => service.getCallDetail(callB.id, adminA),
+      /Call not found/
+    )
+  })
+
+  await runTest('did provisioning binds a DID to a mailbox and reverses', async () => {
+    const { ensurePrimaryTenant } = await getModules()
+    const { DidProvisioningService } = await import(
+      './services/didProvisioningService.js'
+    )
+    const { FakeSipTrunkProvider } = await import('./providers/sip/fake.js')
+    const { mailboxRepository } = await import(
+      './repositories/mailboxRepository.js'
+    )
+    const { didRepository } = await import('./repositories/didRepository.js')
+
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    const service = new DidProvisioningService(
+      new FakeSipTrunkProvider(['+15550102000'])
+    )
+
+    const did = await service.provision(tenantId, {
+      number: '+15550102000',
+      mailboxName: 'Forwarded line',
+    })
+    assert.equal(did.number, '+15550102000')
+    assert.equal(did.status, 'active')
+    assert.ok(did.mailboxId)
+
+    // A mailbox now routes that DID, scoped to the tenant.
+    const mailbox = mailboxRepository.getByNumber('+15550102000')
+    assert.ok(mailbox)
+    assert.equal(mailbox!.id, did.mailboxId)
+    assert.deepEqual(
+      service.listForTenant(tenantId).map(d => d.number),
+      ['+15550102000']
+    )
+
+    // Double-provisioning the same number is rejected.
+    await assert.rejects(
+      () => service.provision(tenantId, { number: '+15550102000' }),
+      /already provisioned/
+    )
+
+    // Releasing reverses routing and marks the DID released.
+    await service.release(tenantId, '+15550102000')
+    assert.equal(didRepository.getByNumber('+15550102000')!.status, 'released')
+    assert.equal(mailboxRepository.getByNumber('+15550102000'), null)
+  })
+
+  await runTest('usage metering aggregates with markup', async () => {
+    const { ensurePrimaryTenant } = await getModules()
+    const { UsageService } = await import('./services/usageService.js')
+    const { tenantLimitsRepository } = await import(
+      './repositories/tenantLimitsRepository.js'
+    )
+
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    tenantLimitsRepository.update(tenantId, { markupBps: 20000 }) // 2x
+    const usage = new UsageService()
+
+    usage.recordInboundMinutes(tenantId, 3, 'call-x') // 3 min @ 1c = 3c carrier
+    usage.recordVoicemailProcessing(tenantId, 'call-x') // stt + llm
+
+    const summary = usage.summary(tenantId)
+    const minutes = summary.lines.find(l => l.type === 'inbound_minute')!
+    assert.equal(minutes.carrierCents, 3)
+    assert.equal(minutes.billedCents, 6) // 2x markup
+    assert.ok(summary.totalBilledCents >= summary.totalCarrierCents)
+    assert.ok(summary.lines.some(l => l.type === 'stt'))
+    assert.equal(usage.minutesThisMonth(tenantId), 3)
+  })
+
+  await runTest('did limit blocks provisioning beyond the plan', async () => {
+    const { ensurePrimaryTenant } = await getModules()
+    const { DidProvisioningService } = await import(
+      './services/didProvisioningService.js'
+    )
+    const { FakeSipTrunkProvider } = await import('./providers/sip/fake.js')
+    const { tenantLimitsRepository } = await import(
+      './repositories/tenantLimitsRepository.js'
+    )
+
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    tenantLimitsRepository.update(tenantId, { maxDids: 1 })
+    const service = new DidProvisioningService(
+      new FakeSipTrunkProvider(['+15550109001', '+15550109002'])
+    )
+
+    await service.provision(tenantId, { number: '+15550109001' })
+    await assert.rejects(
+      () => service.provision(tenantId, { number: '+15550109002' }),
+      /DID limit reached/
+    )
+  })
+
+  await runTest('concurrency enforces per-tenant and trunk caps', async () => {
+    await getModules()
+    const { ConcurrencyService } = await import(
+      './services/concurrencyService.js'
+    )
+    const { tenantLimitsRepository } = await import(
+      './repositories/tenantLimitsRepository.js'
+    )
+    const { ensurePrimaryTenant } = await getModules()
+
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    tenantLimitsRepository.update(tenantId, { maxConcurrentCalls: 2 })
+    const concurrency = new ConcurrencyService()
+
+    assert.equal(concurrency.tryBegin(tenantId, 'c1'), true)
+    assert.equal(concurrency.tryBegin(tenantId, 'c2'), true)
+    assert.equal(concurrency.tryBegin(tenantId, 'c3'), false) // tenant cap
+    assert.equal(concurrency.activeForTenant(tenantId), 2)
+
+    concurrency.end('c1')
+    assert.equal(concurrency.tryBegin(tenantId, 'c3'), true) // freed a slot
+  })
+
+  await runTest('did rental is charged once per month and draws the wallet', async () => {
+    const { ensurePrimaryTenant } = await getModules()
+    const { DidProvisioningService } = await import(
+      './services/didProvisioningService.js'
+    )
+    const { FakeSipTrunkProvider } = await import('./providers/sip/fake.js')
+    const { UsageService } = await import('./services/usageService.js')
+
+    const { tenantLimitsRepository } = await import(
+      './repositories/tenantLimitsRepository.js'
+    )
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    tenantLimitsRepository.update(tenantId, { maxDids: 10 })
+    const service = new DidProvisioningService(
+      new FakeSipTrunkProvider(['+15550107000'])
+    )
+    await service.provision(tenantId, { number: '+15550107000' })
+
+    const usage = new UsageService()
+    const before = usage.totalBilledCents(tenantId)
+    usage.sweepDidRentals()
+    const afterOne = usage.totalBilledCents(tenantId)
+    usage.sweepDidRentals() // idempotent — same month, no double charge
+    const afterTwo = usage.totalBilledCents(tenantId)
+
+    assert.ok(afterOne > before, 'rental should be charged once')
+    assert.equal(afterOne, afterTwo, 'second sweep must not double-charge')
+
+    // Next month charges again.
+    usage.sweepDidRentals(new Date(Date.now() + 32 * 24 * 60 * 60 * 1000))
+    assert.ok(usage.totalBilledCents(tenantId) > afterTwo)
+  })
+
+  await runTest('stripe wallet credits on webhook and draws down on usage', async () => {
+    const { ensurePrimaryTenant } = await getModules()
+    const { BillingService } = await import('./services/billingService.js')
+    const { UsageService } = await import('./services/usageService.js')
+
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    const billing = new BillingService()
+    const usage = new UsageService()
+
+    // No prior test credits this wallet, so creditCents starts at 0.
+    assert.equal(billing.wallet(tenantId).creditCents, 0)
+
+    // A verified payment webhook credits the wallet (idempotent on event id).
+    const event = JSON.stringify({
+      id: 'evt_1',
+      type: 'payment_succeeded',
+      tenantId,
+      amountCents: 5000,
+    })
+    billing.handleWebhook(event, undefined)
+    billing.handleWebhook(event, undefined) // replay must not double-credit
+    assert.equal(billing.wallet(tenantId).creditCents, 5000)
+
+    // balance is always credit minus billed usage.
+    const before = billing.wallet(tenantId)
+    assert.equal(before.balanceCents, 5000 - before.billedCents)
+
+    // Recording usage draws the balance down by the newly billed amount.
+    usage.recordInboundMinutes(tenantId, 10, 'c')
+    const after = billing.wallet(tenantId)
+    assert.ok(after.billedCents > before.billedCents)
+    assert.equal(after.balanceCents, 5000 - after.billedCents)
+
+    // A bad webhook body is ignored, not credited.
+    billing.handleWebhook(JSON.stringify({ type: 'noise' }), undefined)
+    assert.equal(billing.wallet(tenantId).creditCents, 5000)
   })
 
   await runTest('requireAdmin blocks non-admins', async () => {
@@ -642,10 +899,12 @@ async function main() {
         './repositories/groupRepository.js'
       )
       const { userRepository } = await import('./repositories/userRepository.js')
+      const { ensurePrimaryTenant } = await import('./db/client.js')
       type SsoIdentity = import('./providers/auth/types.js').SsoIdentity
       type SsoProvider = import('./providers/auth/types.js').SsoProvider
 
-      const opsGroup = groupRepository.create({ name: 'Ops' })
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const opsGroup = groupRepository.create({ name: 'Ops', tenantId })
       groupRepository.setMappings([
         { externalName: 'ops', groupId: opsGroup.id },
       ])

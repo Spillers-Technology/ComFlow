@@ -15,6 +15,7 @@ type GroupRow = {
   id: string
   name: string
   description: string | null
+  tenant_id: string
   created_at: string
   updated_at: string
 }
@@ -32,7 +33,7 @@ function mapGroup(row: GroupRow): Group {
 function membersOf(groupId: string): User[] {
   const rows = db
     .prepare(`
-      SELECT u.id, u.email, u.display_name, u.role, u.auth_provider
+      SELECT u.id, u.email, u.display_name, u.role, u.auth_provider, u.tenant_id
       FROM group_members gm
       JOIN users u ON u.id = gm.user_id
       WHERE gm.group_id = ?
@@ -44,6 +45,7 @@ function membersOf(groupId: string): User[] {
     display_name: string | null
     role: User['role']
     auth_provider: string
+    tenant_id: string
   }[]
   return rows.map(row =>
     UserSchema.parse({
@@ -52,6 +54,7 @@ function membersOf(groupId: string): User[] {
       displayName: row.display_name,
       role: row.role,
       authProvider: row.auth_provider,
+      tenantId: row.tenant_id,
     })
   )
 }
@@ -96,15 +99,17 @@ function toDetail(group: Group): GroupDetail {
 }
 
 export const groupRepository = {
-  list(): Group[] {
+  list(tenantId: string): Group[] {
     const rows = db
-      .prepare('SELECT * FROM groups ORDER BY lower(name) ASC')
-      .all() as GroupRow[]
+      .prepare(
+        'SELECT * FROM groups WHERE tenant_id = ? ORDER BY lower(name) ASC'
+      )
+      .all(tenantId) as GroupRow[]
     return rows.map(mapGroup)
   },
 
-  listDetail(): GroupDetail[] {
-    return this.list().map(toDetail)
+  listDetail(tenantId: string): GroupDetail[] {
+    return this.list(tenantId).map(toDetail)
   },
 
   getById(id: string): Group | null {
@@ -114,23 +119,36 @@ export const groupRepository = {
     return row ? mapGroup(row) : null
   },
 
+  /** The tenant a group belongs to, for isolation checks at the route layer. */
+  tenantIdOf(id: string): string | null {
+    const row = db.prepare('SELECT tenant_id FROM groups WHERE id = ?').get(id) as
+      | { tenant_id: string }
+      | undefined
+    return row?.tenant_id ?? null
+  },
+
   getDetail(id: string): GroupDetail | null {
     const group = this.getById(id)
     return group ? toDetail(group) : null
   },
 
-  create(input: { name: string; description?: string | null }): Group {
+  create(input: {
+    name: string
+    description?: string | null
+    tenantId: string
+  }): Group {
     const now = new Date().toISOString()
     const row: GroupRow = {
       id: randomUUID(),
       name: input.name,
       description: input.description ?? null,
+      tenant_id: input.tenantId,
       created_at: now,
       updated_at: now,
     }
     db.prepare(`
-      INSERT INTO groups (id, name, description, created_at, updated_at)
-      VALUES (@id, @name, @description, @created_at, @updated_at)
+      INSERT INTO groups (id, name, description, tenant_id, created_at, updated_at)
+      VALUES (@id, @name, @description, @tenant_id, @created_at, @updated_at)
     `).run(row)
     return mapGroup(row)
   },

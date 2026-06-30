@@ -20,6 +20,7 @@ import {
   getPrompts,
   updateMailbox,
 } from '../lib/api'
+import { DidManagerCard } from './DidManagerCard'
 
 export function MailboxesTab() {
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([])
@@ -134,6 +135,8 @@ export function MailboxesTab() {
     <Stack spacing={3}>
       {error && <Alert severity="error">{error}</Alert>}
       {notice && <Alert severity="success">{notice}</Alert>}
+
+      <DidManagerCard onChange={() => void loadMailboxes()} />
 
       <Card>
         <CardHeader

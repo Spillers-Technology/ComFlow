@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { config } from '../config.js'
 
@@ -141,11 +142,85 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 
+  -- Multi-tenancy (3.0): a tenant is a customer org (or a single paid user). The
+  -- platform owner sees all tenants; an org-admin/member is scoped to exactly one.
+  -- Every customer-owned row carries tenant_id so isolation is enforced in queries,
+  -- not by convention.
+  CREATE TABLE IF NOT EXISTS tenants (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    plan TEXT NOT NULL DEFAULT 'free',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  -- DIDs ordered from a SIP trunk provider (VoIP.ms), routed to our shared
+  -- trunk and bound to a tenant's mailbox. The mailbox number column holds the
+  -- DID; this table tracks provisioning lifecycle + pricing for billing/release.
+  CREATE TABLE IF NOT EXISTS provisioned_dids (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    number TEXT NOT NULL UNIQUE,
+    provider TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    monthly_cents INTEGER NOT NULL DEFAULT 0,
+    per_minute_cents INTEGER NOT NULL DEFAULT 0,
+    mailbox_id TEXT,
+    created_at TEXT NOT NULL,
+    released_at TEXT
+  );
+
+  -- Usage metering (3.0): one row per billable unit consumed by a tenant.
+  -- unit_cost_cents is the raw carrier/AI cost; billed_cents is what the tenant
+  -- is charged (carrier cost x the tenant's markup). Aggregated for the wallet
+  -- and the transparent usage breakdown.
+  CREATE TABLE IF NOT EXISTS usage_events (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    unit_cost_cents REAL NOT NULL,
+    billed_cents INTEGER NOT NULL,
+    call_id TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  -- Prepaid wallet per tenant. credit_cents is the running total funded via
+  -- Stripe (top-ups + subscription credits); the available balance is
+  -- credit_cents minus aggregated usage_events.billed_cents.
+  CREATE TABLE IF NOT EXISTS tenant_billing (
+    tenant_id TEXT PRIMARY KEY,
+    stripe_customer_id TEXT,
+    subscription_id TEXT,
+    plan TEXT,
+    credit_cents INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+  );
+
+  -- Idempotency guard so a replayed Stripe webhook can't double-credit a wallet.
+  CREATE TABLE IF NOT EXISTS billing_events (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL
+  );
+
+  -- Per-tenant limits + pricing. markup_bps is basis points over carrier cost
+  -- (15000 = 1.5x). A row is created lazily from config defaults.
+  CREATE TABLE IF NOT EXISTS tenant_limits (
+    tenant_id TEXT PRIMARY KEY,
+    max_concurrent_calls INTEGER NOT NULL,
+    max_dids INTEGER NOT NULL,
+    included_minutes INTEGER NOT NULL,
+    markup_bps INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   -- RBAC (M3): groups grant mailbox visibility. Admins see everything; members
   -- see only the mailboxes their groups grant.
   CREATE TABLE IF NOT EXISTS groups (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
     description TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -216,3 +291,59 @@ addColumnIfMissing('calls', 'email_notified_at', 'TEXT')
 addColumnIfMissing('calls', 'reviewed_by', 'TEXT')
 // Links a local user row to an external SSO identity (subject/nameID).
 addColumnIfMissing('users', 'external_id', 'TEXT')
+
+// Multi-tenancy (3.0): every customer-owned table gets a tenant_id. Added as a
+// nullable column first so existing databases migrate cleanly, then backfilled
+// onto a single "primary" tenant below.
+const TENANT_SCOPED_TABLES = [
+  'users',
+  'mailboxes',
+  'calls',
+  'groups',
+  'api_keys',
+  'scheduled_calls',
+  'audio_prompts',
+] as const
+
+for (const table of TENANT_SCOPED_TABLES) {
+  addColumnIfMissing(table, 'tenant_id', 'TEXT')
+}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_calls_tenant ON calls(tenant_id);
+  CREATE INDEX IF NOT EXISTS idx_mailboxes_tenant ON mailboxes(tenant_id);
+  CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
+  CREATE INDEX IF NOT EXISTS idx_usage_tenant_created ON usage_events(tenant_id, created_at);
+`)
+
+/**
+ * Ensure a single "primary" tenant exists and that every pre-tenancy row is
+ * attributed to it. Idempotent: safe to run on every boot. Returns the primary
+ * tenant id so bootstrap (config/app) can attach the first admin + mailbox.
+ */
+export function ensurePrimaryTenant(defaults: {
+  name: string
+  slug: string
+}): string {
+  const existing = db
+    .prepare('SELECT id FROM tenants ORDER BY datetime(created_at) ASC LIMIT 1')
+    .get() as { id: string } | undefined
+
+  let tenantId = existing?.id
+  if (!tenantId) {
+    const now = new Date().toISOString()
+    tenantId = randomUUID()
+    db.prepare(`
+      INSERT INTO tenants (id, name, slug, plan, status, created_at, updated_at)
+      VALUES (@id, @name, @slug, 'free', 'active', @now, @now)
+    `).run({ id: tenantId, name: defaults.name, slug: defaults.slug, now })
+  }
+
+  for (const table of TENANT_SCOPED_TABLES) {
+    db.prepare(
+      `UPDATE ${table} SET tenant_id = ? WHERE tenant_id IS NULL`
+    ).run(tenantId)
+  }
+
+  return tenantId
+}

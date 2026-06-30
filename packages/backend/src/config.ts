@@ -95,6 +95,41 @@ export const config = {
       process.env.COMFLOW_SCHEDULER_INTERVAL_SEC ?? 15
     ),
   },
+  // SIP trunk provider for on-the-fly DID provisioning. When VoIP.ms creds are
+  // present the real adapter is used; otherwise a `fake` in-memory pool backs
+  // dev/tests. One shared account serves all tenants.
+  sipTrunk: {
+    provider: readOptionalEnv('COMFLOW_SIP_TRUNK_PROVIDER'),
+    voipms: {
+      apiUsername: readOptionalEnv('VOIPMS_API_USERNAME'),
+      apiPassword: readOptionalEnv('VOIPMS_API_PASSWORD'),
+      subAccount: readOptionalEnv('VOIPMS_SUBACCOUNT') ?? '',
+      defaultState: readOptionalEnv('VOIPMS_DEFAULT_STATE') ?? 'NY',
+      defaultMonthlyCents: Number(process.env.VOIPMS_DEFAULT_MONTHLY_CENTS ?? 85),
+      defaultPerMinuteCents: Number(
+        process.env.VOIPMS_DEFAULT_PER_MINUTE_CENTS ?? 1
+      ),
+    },
+  },
+  // Stripe wallet billing. When a secret key is present the real adapter is
+  // used; otherwise a `fake` adapter backs dev/tests (no network, no signatures).
+  billing: {
+    provider: readOptionalEnv('COMFLOW_BILLING_PROVIDER'),
+    // Wallet balance is only enforced when real billing is in play (hosted
+    // mode). Self-host/dev (fake provider) never gates on balance.
+    enforced:
+      readOptionalEnv('COMFLOW_BILLING_PROVIDER') === 'stripe' ||
+      Boolean(readOptionalEnv('STRIPE_SECRET_KEY')),
+    stripeSecretKey: readOptionalEnv('STRIPE_SECRET_KEY'),
+    stripeWebhookSecret: readOptionalEnv('STRIPE_WEBHOOK_SECRET'),
+    // Where Stripe Checkout returns the customer after pay/cancel.
+    successUrl:
+      readOptionalEnv('STRIPE_SUCCESS_URL') ??
+      `${process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173'}/billing?status=success`,
+    cancelUrl:
+      readOptionalEnv('STRIPE_CANCEL_URL') ??
+      `${process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173'}/billing?status=cancel`,
+  },
   secrets: {
     openaiApiKey: readEnv('COMFLOW_OPENAI_API_KEY', 'OPENAI_API_KEY'),
     anthropicApiKey: readEnv('COMFLOW_ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEY'),
@@ -185,6 +220,31 @@ export const config = {
         )
       },
     },
+  },
+  // The "primary" tenant every pre-tenancy row backfills onto, and the home of
+  // the bootstrap admin + default mailbox. In self-host/open mode this is the
+  // only tenant; in hosted mode the platform owner adds more alongside it.
+  defaultTenant: {
+    name: readOptionalEnv('COMFLOW_DEFAULT_TENANT_NAME') ?? 'Primary',
+    slug: readOptionalEnv('COMFLOW_DEFAULT_TENANT_SLUG') ?? 'primary',
+  },
+  // Default per-tenant limits + pricing, applied when a tenant has no override.
+  // markupBps is basis points over carrier cost (15000 = 1.5x).
+  defaultTenantLimits: {
+    maxConcurrentCalls: Number(process.env.COMFLOW_DEFAULT_MAX_CONCURRENT ?? 3),
+    maxDids: Number(process.env.COMFLOW_DEFAULT_MAX_DIDS ?? 1),
+    includedMinutes: Number(process.env.COMFLOW_DEFAULT_INCLUDED_MINUTES ?? 0),
+    markupBps: Number(process.env.COMFLOW_DEFAULT_MARKUP_BPS ?? 15000),
+  },
+  // The whole-trunk concurrent-call ceiling (e.g. a 10-channel SIP trunk).
+  trunkConcurrentCallLimit: Number(process.env.COMFLOW_TRUNK_CHANNELS ?? 10),
+  // Raw carrier/AI unit costs in cents, used to meter usage. Owner-tunable.
+  usageCosts: {
+    inboundPerMinuteCents: Number(process.env.COMFLOW_COST_INBOUND_MIN ?? 1),
+    outboundPerMinuteCents: Number(process.env.COMFLOW_COST_OUTBOUND_MIN ?? 1),
+    sttCents: Number(process.env.COMFLOW_COST_STT ?? 1),
+    llmCents: Number(process.env.COMFLOW_COST_LLM ?? 1),
+    ttsCents: Number(process.env.COMFLOW_COST_TTS ?? 1),
   },
   defaultMailbox: {
     name: readOptionalEnv('COMFLOW_DEFAULT_MAILBOX_NAME') ?? 'Main mailbox',

@@ -1,6 +1,9 @@
 import { z } from 'zod'
 
-export const UserRoleSchema = z.enum(['admin', 'member'])
+// `owner` is the platform owner (global, sees every tenant). `admin` and
+// `member` are scoped to a single tenant: admin manages their own org, member
+// sees only group-granted mailboxes within it.
+export const UserRoleSchema = z.enum(['owner', 'admin', 'member'])
 
 export const UserSchema = z.object({
   id: z.string(),
@@ -8,6 +11,9 @@ export const UserSchema = z.object({
   displayName: z.string().nullable(),
   role: UserRoleSchema,
   authProvider: z.string(),
+  // The tenant this user belongs to. The platform owner spans all tenants but
+  // still has a home tenant id for attribution.
+  tenantId: z.string(),
 })
 
 export const LoginRequestSchema = z.object({

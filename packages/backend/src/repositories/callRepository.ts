@@ -38,6 +38,7 @@ type CallRow = {
   synced_at: string | null
   email_notified_at: string | null
   mailbox_id: string | null
+  tenant_id: string | null
   created_at: string
   updated_at: string
 }
@@ -47,6 +48,8 @@ export type CallFilters = {
   intent?: CallIntent
   assignedQueue?: string
   q?: string
+  // Tenant isolation: when present, only calls in this tenant are returned.
+  tenantId?: string
   // RBAC scope: when present, only calls in these mailboxes are returned. An
   // empty array intentionally matches nothing (a member granted no mailboxes).
   mailboxIds?: string[]
@@ -58,6 +61,7 @@ export type CreateCallInput = {
   callbackNumber: string | null
   transcript?: string
   mailboxId?: string | null
+  tenantId?: string | null
 }
 
 function mapCall(row: CallRow): CallRecord {
@@ -143,6 +147,7 @@ export const callRepository = {
       synced_at: null,
       email_notified_at: null,
       mailbox_id: input.mailboxId ?? null,
+      tenant_id: input.tenantId ?? null,
       created_at: now,
       updated_at: now,
     }
@@ -153,14 +158,14 @@ export const callRepository = {
         intent, urgency, summary, transcript, raw_transcript, status,
         assigned_queue, recording_status, recording_path, recording_mime_type,
         reviewed_at, synced_ticket_id, synced_ticket_provider, synced_at,
-        mailbox_id, created_at, updated_at
+        mailbox_id, tenant_id, created_at, updated_at
       )
       VALUES (
         @id, @telephony_call_id, @source, @caller_name, @company, @callback_number,
         @intent, @urgency, @summary, @transcript, @raw_transcript, @status,
         @assigned_queue, @recording_status, @recording_path, @recording_mime_type,
         @reviewed_at, @synced_ticket_id, @synced_ticket_provider, @synced_at,
-        @mailbox_id, @created_at, @updated_at
+        @mailbox_id, @tenant_id, @created_at, @updated_at
       )
     `).run(row)
 
@@ -171,6 +176,10 @@ export const callRepository = {
     const where: string[] = []
     const values: unknown[] = []
 
+    if (filters.tenantId) {
+      where.push('tenant_id = ?')
+      values.push(filters.tenantId)
+    }
     if (filters.status) {
       where.push('status = ?')
       values.push(filters.status)
@@ -219,6 +228,22 @@ export const callRepository = {
     const row = db.prepare('SELECT * FROM calls WHERE id = ?').get(id) as
       | CallRow
       | undefined
+    return row ? mapCall(row) : null
+  },
+
+  /** The tenant a call belongs to, for metering and isolation checks. */
+  tenantIdOf(id: string): string | null {
+    const row = db
+      .prepare('SELECT tenant_id FROM calls WHERE id = ?')
+      .get(id) as { tenant_id: string | null } | undefined
+    return row?.tenant_id ?? null
+  },
+
+  /** Tenant-scoped fetch: returns null if the call is outside the tenant. */
+  getInTenant(id: string, tenantId: string): CallRecord | null {
+    const row = db
+      .prepare('SELECT * FROM calls WHERE id = ? AND tenant_id = ?')
+      .get(id, tenantId) as CallRow | undefined
     return row ? mapCall(row) : null
   },
 

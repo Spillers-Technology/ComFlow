@@ -49,6 +49,16 @@ SIP source ──SIP/RTP──▶ baresip (SIP edge) ──ctrl_tcp──▶ Com
 - **Hosted MCP endpoint**: `/api/mcp` exposes ComFlow tools and recording
   resources over MCP Streamable HTTP, authenticated by the same `cf_` keys and
   scoped to the key owner's role and mailbox grants.
+- **Multi-tenant (hosted mode)**: a hard `tenant_id` boundary isolates every
+  customer's users, mailboxes, DIDs, and voicemails. A platform `owner` manages
+  tenants and plans; each tenant has its own `admin`.
+- **On-the-fly DID provisioning**: order numbers from a SIP trunk provider
+  (VoIP.ms) over its API and bind them to a tenant's mailbox — forward your line
+  to the DID and it answers. A `fake` provider backs dev/tests.
+- **Usage metering & prepaid wallet**: per-tenant metering of minutes, AI, and
+  DID rental with transparent carrier-vs-charged pricing; customers fund a Stripe
+  prepaid wallet that usage draws down. Per-tenant limits and trunk concurrency
+  caps included.
 
 ## Repo layout
 
@@ -56,9 +66,12 @@ SIP source ──SIP/RTP──▶ baresip (SIP edge) ──ctrl_tcp──▶ Com
 .
 ├─ packages/
 │  ├─ shared/    # domain models + Zod schemas
-│  ├─ backend/   # Express API, SQLite, providers, telephony gateway
-│  └─ frontend/  # Vite + React + MUI operator UI
+│  ├─ backend/   # Express API, SQLite, providers (SIP trunk, billing), gateway
+│  ├─ frontend/  # Vite + React + MUI operator UI
+│  └─ mcp/       # hosted MCP endpoint (tools + recording resources)
 ├─ infra/baresip/  # SIP edge: Dockerfile, config, accounts (BYO credentials)
+├─ scripts/        # operator scripts (provision tenants/DIDs, usage) — see runbooks
+├─ docs/runbooks/  # end-to-end onboarding playbooks
 └─ docker-compose.yml
 ```
 
@@ -132,7 +145,12 @@ shown once at creation; only metadata is stored and listed afterward.
 
 Admin-only: `/api/groups*` (RBAC group/membership/mailbox-grant management),
 `/api/users*` (local user create/role/password/delete), `/api/mailboxes` writes,
-`/api/settings/*`.
+`/api/settings/*`, `/api/dids*` (search/provision/release DIDs), `/api/billing/topup`.
+
+Tenant-scoped: `GET /api/usage` (metered usage + transparent pricing),
+`GET /api/billing` (wallet). Owner-only: `/api/tenants*` (tenant/plan/limit
+management, seed org-admins). Open (machine-to-machine):
+`POST /api/webhooks/stripe` (signature-verified wallet credit).
 
 MCP: `POST /api/mcp` (Streamable HTTP) requires `Authorization: Bearer cf_...`.
 Session tokens are intentionally not accepted for MCP. Tools mirror the UI:
@@ -181,21 +199,36 @@ All env vars are documented in [.env.example](.env.example). Highlights:
 - **MCP/API keys**: create `cf_` keys on the Profile page. MCP requests to
   `/api/mcp` act as the key owner; member keys cannot call admin settings,
   group, user, or mailbox-write tools.
+- **Multi-tenant + hosted (3.0)**: `COMFLOW_AUTH_REQUIRED=true` for hosted mode;
+  `COMFLOW_DEFAULT_TENANT_*` names the primary tenant; `COMFLOW_DEFAULT_*` plan
+  limits (`MAX_DIDS`, `MAX_CONCURRENT`, `INCLUDED_MINUTES`, `MARKUP_BPS`) and
+  `COMFLOW_TRUNK_CHANNELS` seed pricing/limits; `COMFLOW_COST_*` set raw
+  carrier/AI unit costs.
+- **DID provisioning (VoIP.ms)**: `VOIPMS_API_USERNAME`, `VOIPMS_API_PASSWORD`,
+  `VOIPMS_SUBACCOUNT` (trunk the DIDs route to), `VOIPMS_DEFAULT_STATE`. Absent
+  these, a `fake` provider is used. Override with `COMFLOW_SIP_TRUNK_PROVIDER`.
+- **Stripe billing**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
+  `STRIPE_{SUCCESS,CANCEL}_URL`. Absent these, a `fake` billing provider is used
+  and wallet balance is not enforced (self-host stays friction-free).
 
-## Roadmap
+## Hosting it for others (SaaS)
 
-- **M1**: baresip SIP ingestion; tight scheduled-outbound; AnchorDesk sync;
-  polished single inbox; audio-prompt uploads; local accounts + single
-  mailbox/DID admin config.
-- **M2 — SSO** ✅: OIDC and SAML 2.0 behind the `SsoProvider` abstraction,
-  aligned with AnchorDesk's Authentik setup. Users provision on first login and
-  allowlisted emails (`AUTH_ADMIN_EMAILS`) are promoted to admin.
-- **M3 — Teams & RBAC** ✅: multiple mailboxes (one per DID/line); inbound calls
-  route to a mailbox by dialed DID / SIP account. Groups grant per-mailbox
-  visibility — members see only their granted mailboxes; admins manage users,
-  groups, mailboxes, and IdP-group mappings on the Access/Settings pages.
-- **2.3 — Self-service + MCP** ✅: profile/password management, user-owned API
-  keys, and a hosted MCP endpoint with ComFlow tools and recording resources.
+ComFlow runs two ways: **bring your own trunk and self-host** (open or local-auth
+mode, single tenant — nothing below is required), or **run it as a service** for
+others. In hosted mode (`COMFLOW_AUTH_REQUIRED=true`) you operate one VoIP.ms
+account and one set of AI keys; each customer is an isolated tenant that forwards
+their calls to a DID you provision, funds a Stripe prepaid wallet, and signs in to
+their own voicemails.
+
+Two end-to-end playbooks, with copy-paste scripts:
+
+- [Onboard a team account](docs/runbooks/onboard-team-account.md) — a customer
+  org with its own admin and isolated mailboxes/DIDs.
+- [Onboard a paid forward-to user](docs/runbooks/onboard-paid-forward-to-user.md)
+  — a single user on a monthly plan with one DID and a Stripe wallet.
+
+The platform is fully operable over the REST API today (see `scripts/`); a
+graphical owner dashboard is on the roadmap.
 
 ## Short version
 

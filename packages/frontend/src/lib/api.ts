@@ -45,6 +45,19 @@ import {
   UpdateProfile,
   UserListResponseSchema,
   UserResponseSchema,
+  CheckoutResponseSchema,
+  CreateTenantRequest,
+  GetProvisionedDidsResponseSchema,
+  GetTenantsResponseSchema,
+  GetUsageResponseSchema,
+  ProvisionDidRequest,
+  ProvisionDidResponseSchema,
+  SearchDidsResponseSchema,
+  TenantLimitsResponseSchema,
+  TenantResponseSchema,
+  UpdateTenantLimitsRequest,
+  UpdateTenantRequest,
+  WalletResponseSchema,
 } from '../../../shared/src/index.js'
 
 const TOKEN_KEY = 'comflow_token'
@@ -541,6 +554,114 @@ export async function deleteUser(id: string) {
     }
     throw new Error(message)
   }
+}
+
+// --- Usage & billing (3.0) ---
+
+export function getUsage() {
+  return request('/api/usage', { method: 'GET' }, GetUsageResponseSchema)
+}
+
+export function getWallet() {
+  return request('/api/billing', { method: 'GET' }, WalletResponseSchema)
+}
+
+export function startTopUp(amountCents: number) {
+  return request(
+    '/api/billing/topup',
+    { method: 'POST', body: JSON.stringify({ amountCents }) },
+    CheckoutResponseSchema
+  )
+}
+
+// --- DIDs (admin) ---
+
+export function getDids() {
+  return request('/api/dids', { method: 'GET' }, GetProvisionedDidsResponseSchema)
+}
+
+export function searchDids(country: 'US' | 'CA', query?: string) {
+  const params = new URLSearchParams({ country })
+  if (query) params.set('query', query)
+  return request(
+    `/api/dids/search?${params.toString()}`,
+    { method: 'GET' },
+    SearchDidsResponseSchema
+  )
+}
+
+export function provisionDid(payload: ProvisionDidRequest) {
+  return request(
+    '/api/dids',
+    { method: 'POST', body: JSON.stringify(payload) },
+    ProvisionDidResponseSchema
+  )
+}
+
+export async function releaseDid(number: string) {
+  const token = getToken()
+  const response = await fetch(`/api/dids/${encodeURIComponent(number)}`, {
+    method: 'DELETE',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!response.ok && response.status !== 204) {
+    let message = 'Failed to release DID.'
+    try {
+      message = ((await response.json()) as { error?: string }).error ?? message
+    } catch {
+      // keep the generic message
+    }
+    throw new Error(message)
+  }
+}
+
+// --- Tenants (owner only) ---
+
+export function getTenants() {
+  return request('/api/tenants', { method: 'GET' }, GetTenantsResponseSchema)
+}
+
+export function createTenant(payload: CreateTenantRequest) {
+  return request(
+    '/api/tenants',
+    { method: 'POST', body: JSON.stringify(payload) },
+    TenantResponseSchema
+  )
+}
+
+export function updateTenant(id: string, payload: UpdateTenantRequest) {
+  return request(
+    `/api/tenants/${id}`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+    TenantResponseSchema
+  )
+}
+
+export function getTenantLimits(id: string) {
+  return request(
+    `/api/tenants/${id}/limits`,
+    { method: 'GET' },
+    TenantLimitsResponseSchema
+  )
+}
+
+export function updateTenantLimits(
+  id: string,
+  payload: UpdateTenantLimitsRequest
+) {
+  return request(
+    `/api/tenants/${id}/limits`,
+    { method: 'PATCH', body: JSON.stringify(payload) },
+    TenantLimitsResponseSchema
+  )
+}
+
+export function createTenantUser(id: string, payload: CreateUserRequest) {
+  return request(
+    `/api/tenants/${id}/users`,
+    { method: 'POST', body: JSON.stringify(payload) },
+    UserResponseSchema
+  )
 }
 
 /** Read a File into the base64 string the prompt-upload endpoint expects. */

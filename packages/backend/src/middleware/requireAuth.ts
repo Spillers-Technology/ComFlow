@@ -1,22 +1,31 @@
 import { NextFunction, Request, Response } from 'express'
 import { User } from '../../../shared/src/index.js'
 import { config } from '../config.js'
+import { ensurePrimaryTenant } from '../db/client.js'
 import { verifySessionToken } from '../lib/token.js'
+import { tenantRepository } from '../repositories/tenantRepository.js'
 import { userRepository } from '../repositories/userRepository.js'
 import { apiKeyService } from '../services/apiKeyService.js'
 import { toApiUser } from '../services/authService.js'
 
-// Synthetic identity used when auth is not enforced (open mode), so handlers
-// can always rely on res.locals.user being present.
-const OPEN_MODE_ADMIN: User = {
-  id: 'open-mode',
-  email: 'admin@local',
-  displayName: 'Open Mode',
-  role: 'admin',
-  authProvider: 'open',
+// Synthetic identity used when auth is not enforced (open mode), so handlers can
+// always rely on res.locals.user being present. It is the platform owner of the
+// primary tenant, so a self-hoster in open mode retains full control.
+function openModeUser(): User {
+  const primary =
+    tenantRepository.getPrimary() ??
+    tenantRepository.getById(ensurePrimaryTenant(config.defaultTenant))!
+  return {
+    id: 'open-mode',
+    email: 'admin@local',
+    displayName: 'Open Mode',
+    role: 'owner',
+    authProvider: 'open',
+    tenantId: primary.id,
+  }
 }
 
-/** Guard UI-facing routes. In open mode it passes through with a default admin. */
+/** Guard UI-facing routes. In open mode it passes through with a default owner. */
 export function requireAuth(
   request: Request,
   response: Response,
@@ -37,7 +46,7 @@ export function requireAuth(
   }
 
   if (!config.auth.required) {
-    response.locals.user = OPEN_MODE_ADMIN
+    response.locals.user = openModeUser()
     next()
     return
   }

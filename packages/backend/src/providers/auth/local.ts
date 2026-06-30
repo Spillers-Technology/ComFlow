@@ -3,13 +3,21 @@ import { verifyPassword } from '../../lib/password.js'
 import { userRepository } from '../../repositories/userRepository.js'
 import { AuthProvider } from './types.js'
 
-function toApiUser(record: { id: string; email: string; displayName: string | null; role: User['role']; authProvider: string }): User {
+function toApiUser(record: {
+  id: string
+  email: string
+  displayName: string | null
+  role: User['role']
+  authProvider: string
+  tenantId: string
+}): User {
   return {
     id: record.id,
     email: record.email,
     displayName: record.displayName,
     role: record.role,
     authProvider: record.authProvider,
+    tenantId: record.tenantId,
   }
 }
 

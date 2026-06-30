@@ -16,12 +16,16 @@ export function createMailboxesRouter(service: MailboxService) {
   router.get(
     '/',
     asyncHandler((_request, response) => {
-      // Ensure the default mailbox exists so the admin page always has one.
-      service.getDefault()
-      // Members see only the mailboxes their groups grant; admins see all.
       const user = response.locals.user as User
+      // Ensure the tenant's default mailbox exists so the page always has one.
+      service.getDefault(user.tenantId)
+      // Members see only the mailboxes their groups grant; admins see all in
+      // their tenant.
       response.json({
-        items: accessService.filterMailboxes(user, service.list()),
+        items: accessService.filterMailboxes(
+          user,
+          service.list(user.tenantId)
+        ),
       })
     })
   )
@@ -30,8 +34,9 @@ export function createMailboxesRouter(service: MailboxService) {
     '/',
     requireAdmin,
     asyncHandler((request, response) => {
+      const user = response.locals.user as User
       const input = parseBody(CreateMailboxRequestSchema, request.body)
-      const mailbox = service.create(input)
+      const mailbox = service.create(input, user.tenantId)
       response.status(201).json({ mailbox })
     })
   )
@@ -40,6 +45,7 @@ export function createMailboxesRouter(service: MailboxService) {
     '/:id',
     requireAdmin,
     asyncHandler((request, response) => {
+      const user = response.locals.user as User
       const id = Array.isArray(request.params.id)
         ? request.params.id[0]
         : request.params.id
@@ -47,7 +53,7 @@ export function createMailboxesRouter(service: MailboxService) {
         throw new HttpError(400, 'Mailbox id is required.')
       }
       const input = parseBody(UpdateMailboxRequestSchema, request.body)
-      const mailbox = service.update(id, input)
+      const mailbox = service.update(id, input, user.tenantId)
       response.json({ mailbox })
     })
   )
@@ -56,13 +62,14 @@ export function createMailboxesRouter(service: MailboxService) {
     '/:id',
     requireAdmin,
     asyncHandler((request, response) => {
+      const user = response.locals.user as User
       const id = Array.isArray(request.params.id)
         ? request.params.id[0]
         : request.params.id
       if (!id) {
         throw new HttpError(400, 'Mailbox id is required.')
       }
-      service.remove(id)
+      service.remove(id, user.tenantId)
       response.status(204).end()
     })
   )

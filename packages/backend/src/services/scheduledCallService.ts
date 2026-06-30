@@ -13,6 +13,7 @@ import {
 import { AudioPromptService } from './audioPromptService.js'
 import { EngineService } from './engineService.js'
 import { TelephonyGatewayService } from './telephonyGatewayService.js'
+import { UsageService } from './usageService.js'
 
 function toApi(record: ScheduledCallRecord): ScheduledCall {
   // The repository's API shape already matches ScheduledCall; strip the
@@ -43,14 +44,15 @@ export class ScheduledCallService {
   constructor(
     private readonly engineService: EngineService,
     private readonly telephonyGateway: TelephonyGatewayService,
-    private readonly audioPromptService: AudioPromptService
+    private readonly audioPromptService: AudioPromptService,
+    private readonly usageService: UsageService = new UsageService()
   ) {}
 
-  list(): ScheduledCall[] {
-    return scheduledCallRepository.list().map(toApi)
+  list(tenantId: string): ScheduledCall[] {
+    return scheduledCallRepository.list(tenantId).map(toApi)
   }
 
-  create(input: CreateScheduledCallRequest): ScheduledCall {
+  create(input: CreateScheduledCallRequest, tenantId: string): ScheduledCall {
     const record = scheduledCallRepository.create({
       toNumber: input.toNumber,
       scheduledAt: input.scheduledAt,
@@ -58,13 +60,14 @@ export class ScheduledCallService {
       questionText: input.questionText ?? '',
       messagePromptId: input.messageAudioPromptId ?? null,
       questionPromptId: input.questionAudioPromptId ?? null,
+      tenantId,
     })
     return toApi(record)
   }
 
-  cancel(id: string): ScheduledCall {
+  cancel(id: string, tenantId: string): ScheduledCall {
     const existing = scheduledCallRepository.getById(id)
-    if (!existing) {
+    if (!existing || scheduledCallRepository.tenantIdOf(id) !== tenantId) {
       throw new HttpError(404, 'Scheduled call not found.')
     }
     if (existing.status !== 'scheduled') {
@@ -74,9 +77,13 @@ export class ScheduledCallService {
     return toApi(updated!)
   }
 
-  getAnswerAudio(id: string) {
+  getAnswerAudio(id: string, tenantId: string) {
     const record = scheduledCallRepository.getById(id)
-    if (!record || !record.answerRecordingPath) {
+    if (
+      !record ||
+      scheduledCallRepository.tenantIdOf(id) !== tenantId ||
+      !record.answerRecordingPath
+    ) {
       throw new HttpError(404, 'Answer audio not found.')
     }
     const absolutePath = path.resolve(config.dataDir, record.answerRecordingPath)
@@ -188,6 +195,21 @@ export class ScheduledCallService {
         answerRecordingPath: answerRelativePath,
         answerTranscript,
       })
+
+      // Meter the outbound call: TTS for each synthesized segment, the call
+      // minutes, and STT/LLM when an answer was captured.
+      const tenantId = scheduledCallRepository.tenantIdOf(record.id)
+      if (tenantId) {
+        this.usageService.recordTts(tenantId)
+        this.usageService.recordTts(tenantId)
+        this.usageService.recordOutboundMinutes(
+          tenantId,
+          config.telephony.outboundCaptureWindowSec / 60
+        )
+        if (answerTranscript) {
+          this.usageService.record(tenantId, 'stt', 1, config.usageCosts.sttCents)
+        }
+      }
     } catch (error) {
       scheduledCallRepository.update(record.id, {
         status: 'failed',

@@ -29,14 +29,18 @@ export class CallReviewService {
   ) {}
 
   listCalls(filters: CallFilters, user: User) {
+    // Tenant isolation first, then per-mailbox RBAC within the tenant.
     const scope = accessService.accessibleMailboxIds(user)
+    const tenantScoped: CallFilters = { ...filters, tenantId: user.tenantId }
     const scoped: CallFilters =
-      scope === ALL_MAILBOXES ? filters : { ...filters, mailboxIds: scope }
+      scope === ALL_MAILBOXES
+        ? tenantScoped
+        : { ...tenantScoped, mailboxIds: scope }
     return callRepository.list(scoped)
   }
 
   getCallDetail(id: string, user: User) {
-    const call = callRepository.getById(id)
+    const call = callRepository.getInTenant(id, user.tenantId)
     // 404 (not 403) for out-of-scope calls so we don't reveal their existence.
     if (!call || !accessService.canAccessMailbox(user, call.mailboxId)) {
       throw new HttpError(404, 'Call not found.')
@@ -53,7 +57,7 @@ export class CallReviewService {
     input: CallUpdateInput,
     user: User
   ): Promise<CallRecord> {
-    const existing = callRepository.getById(id)
+    const existing = callRepository.getInTenant(id, user.tenantId)
     if (!existing || !accessService.canAccessMailbox(user, existing.mailboxId)) {
       throw new HttpError(404, 'Call not found.')
     }
@@ -86,7 +90,7 @@ export class CallReviewService {
   }
 
   addNote(callId: string, input: CreateCallNoteInput, user: User) {
-    const call = callRepository.getById(callId)
+    const call = callRepository.getInTenant(callId, user.tenantId)
     if (!call || !accessService.canAccessMailbox(user, call.mailboxId)) {
       throw new HttpError(404, 'Call not found.')
     }
