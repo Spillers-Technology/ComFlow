@@ -119,7 +119,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
   const server = new McpServer(
     {
       name: 'comflow',
-      version: '2.3.0',
+      version: '3.0.0',
     },
     {
       capabilities: {
