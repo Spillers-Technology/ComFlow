@@ -12,6 +12,7 @@ type AudioPromptRow = {
   kind: AudioPromptKind
   audio_path: string
   mime_type: string
+  tenant_id: string | null
   created_at: string
 }
 
@@ -35,6 +36,7 @@ export const audioPromptRepository = {
     kind: AudioPromptKind
     audioPath: string
     mimeType: string
+    tenantId: string
   }): AudioPromptRecord {
     const row: AudioPromptRow = {
       id: randomUUID(),
@@ -42,27 +44,30 @@ export const audioPromptRepository = {
       kind: input.kind,
       audio_path: input.audioPath,
       mime_type: input.mimeType,
+      tenant_id: input.tenantId,
       created_at: new Date().toISOString(),
     }
 
     db.prepare(`
-      INSERT INTO audio_prompts (id, name, kind, audio_path, mime_type, created_at)
-      VALUES (@id, @name, @kind, @audio_path, @mime_type, @created_at)
+      INSERT INTO audio_prompts (id, name, kind, audio_path, mime_type, tenant_id, created_at)
+      VALUES (@id, @name, @kind, @audio_path, @mime_type, @tenant_id, @created_at)
     `).run(row)
 
     return mapRow(row)
   },
 
-  list(kind?: AudioPromptKind): AudioPromptRecord[] {
+  list(tenantId: string, kind?: AudioPromptKind): AudioPromptRecord[] {
     const rows = kind
       ? (db
           .prepare(
-            'SELECT * FROM audio_prompts WHERE kind = ? ORDER BY datetime(created_at) DESC'
+            'SELECT * FROM audio_prompts WHERE tenant_id = ? AND kind = ? ORDER BY datetime(created_at) DESC'
           )
-          .all(kind) as AudioPromptRow[])
+          .all(tenantId, kind) as AudioPromptRow[])
       : (db
-          .prepare('SELECT * FROM audio_prompts ORDER BY datetime(created_at) DESC')
-          .all() as AudioPromptRow[])
+          .prepare(
+            'SELECT * FROM audio_prompts WHERE tenant_id = ? ORDER BY datetime(created_at) DESC'
+          )
+          .all(tenantId) as AudioPromptRow[])
     return rows.map(mapRow)
   },
 
@@ -71,6 +76,14 @@ export const audioPromptRepository = {
       .prepare('SELECT * FROM audio_prompts WHERE id = ?')
       .get(id) as AudioPromptRow | undefined
     return row ? mapRow(row) : null
+  },
+
+  /** The tenant a prompt belongs to, for isolation checks. */
+  tenantIdOf(id: string): string | null {
+    const row = db
+      .prepare('SELECT tenant_id FROM audio_prompts WHERE id = ?')
+      .get(id) as { tenant_id: string | null } | undefined
+    return row?.tenant_id ?? null
   },
 
   delete(id: string): boolean {

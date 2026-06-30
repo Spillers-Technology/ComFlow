@@ -186,6 +186,13 @@ export const config = {
       },
     },
   },
+  // The "primary" tenant every pre-tenancy row backfills onto, and the home of
+  // the bootstrap admin + default mailbox. In self-host/open mode this is the
+  // only tenant; in hosted mode the platform owner adds more alongside it.
+  defaultTenant: {
+    name: readOptionalEnv('COMFLOW_DEFAULT_TENANT_NAME') ?? 'Primary',
+    slug: readOptionalEnv('COMFLOW_DEFAULT_TENANT_SLUG') ?? 'primary',
+  },
   defaultMailbox: {
     name: readOptionalEnv('COMFLOW_DEFAULT_MAILBOX_NAME') ?? 'Main mailbox',
     number: readOptionalEnv('COMFLOW_DEFAULT_MAILBOX_NUMBER'),

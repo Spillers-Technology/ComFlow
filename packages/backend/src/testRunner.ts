@@ -36,12 +36,12 @@ process.env.COMFLOW_SIP_AUTH_PASSWORD = ''
 process.env.AUTH_ADMIN_EMAILS = 'boss@example.com'
 
 async function getModules() {
-  const [{ createApp }, { db }] = await Promise.all([
+  const [{ createApp }, { db, ensurePrimaryTenant }] = await Promise.all([
     import('./app.js'),
     import('./db/client.js'),
   ])
 
-  return { createApp, db }
+  return { createApp, db, ensurePrimaryTenant }
 }
 
 async function resetDb() {
@@ -531,7 +531,7 @@ async function main() {
   })
 
   await runTest('rbac scopes mailbox access and call lists', async () => {
-    const { db } = await getModules()
+    const { db, ensurePrimaryTenant } = await getModules()
     const { userRepository } = await import('./repositories/userRepository.js')
     const { groupRepository } = await import('./repositories/groupRepository.js')
     const { callRepository } = await import('./repositories/callRepository.js')
@@ -540,28 +540,31 @@ async function main() {
     )
     const { CallReviewService } = await import('./services/callReviewService.js')
 
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
     const now = new Date().toISOString()
     const insertMailbox = db.prepare(`
-      INSERT INTO mailboxes (id, name, number, greeting_prompt_id, sip_account_ref, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO mailboxes (id, name, number, greeting_prompt_id, sip_account_ref, tenant_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `)
-    insertMailbox.run('mb-a', 'Mailbox A', null, null, null, now, now)
-    insertMailbox.run('mb-b', 'Mailbox B', null, null, null, now, now)
+    insertMailbox.run('mb-a', 'Mailbox A', null, null, null, tenantId, now, now)
+    insertMailbox.run('mb-b', 'Mailbox B', null, null, null, tenantId, now, now)
 
     const admin = userRepository.create({
       email: 'admin@example.com',
       displayName: 'Admin',
       passwordHash: null,
       role: 'admin',
+      tenantId,
     })
     const member = userRepository.create({
       email: 'member@example.com',
       displayName: 'Member',
       passwordHash: null,
       role: 'member',
+      tenantId,
     })
 
-    const group = groupRepository.create({ name: 'Team A' })
+    const group = groupRepository.create({ name: 'Team A', tenantId })
     groupRepository.setMailboxes(group.id, ['mb-a'])
     groupRepository.setMembers(group.id, [member.id])
 
@@ -573,12 +576,14 @@ async function main() {
       source: 'fake',
       callbackNumber: null,
       mailboxId: 'mb-a',
+      tenantId,
     })
     callRepository.createInitial({
       telephonyCallId: 'c-b',
       source: 'fake',
       callbackNumber: null,
       mailboxId: 'mb-b',
+      tenantId,
     })
 
     const service = new CallReviewService()
@@ -593,6 +598,73 @@ async function main() {
     const callB = callRepository.getByTelephonyCallId('c-b')!
     assert.throws(
       () => service.getCallDetail(callB.id, member),
+      /Call not found/
+    )
+  })
+
+  await runTest('tenant isolation hides another tenant\'s calls', async () => {
+    const { db, ensurePrimaryTenant } = await getModules()
+    const { tenantRepository } = await import(
+      './repositories/tenantRepository.js'
+    )
+    const { userRepository } = await import('./repositories/userRepository.js')
+    const { callRepository } = await import('./repositories/callRepository.js')
+    const { CallReviewService } = await import('./services/callReviewService.js')
+
+    const tenantA = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    const tenantB = tenantRepository.create({ name: 'Acme', slug: 'acme' }).id
+
+    const now = new Date().toISOString()
+    const insertMailbox = db.prepare(`
+      INSERT INTO mailboxes (id, name, number, greeting_prompt_id, sip_account_ref, tenant_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    insertMailbox.run('mb-a', 'A', null, null, null, tenantA, now, now)
+    insertMailbox.run('mb-b', 'B', null, null, null, tenantB, now, now)
+
+    // Each tenant's admin sees only their own mailbox's calls.
+    const adminA = userRepository.create({
+      email: 'a-admin@example.com',
+      displayName: 'A',
+      passwordHash: null,
+      role: 'admin',
+      tenantId: tenantA,
+    })
+    const adminB = userRepository.create({
+      email: 'b-admin@example.com',
+      displayName: 'B',
+      passwordHash: null,
+      role: 'admin',
+      tenantId: tenantB,
+    })
+
+    const callA = callRepository.createInitial({
+      telephonyCallId: 'iso-a',
+      source: 'fake',
+      callbackNumber: null,
+      mailboxId: 'mb-a',
+      tenantId: tenantA,
+    })
+    const callB = callRepository.createInitial({
+      telephonyCallId: 'iso-b',
+      source: 'fake',
+      callbackNumber: null,
+      mailboxId: 'mb-b',
+      tenantId: tenantB,
+    })
+
+    const service = new CallReviewService()
+    assert.deepEqual(
+      service.listCalls({}, adminA).map(call => call.id),
+      [callA.id]
+    )
+    assert.deepEqual(
+      service.listCalls({}, adminB).map(call => call.id),
+      [callB.id]
+    )
+    // Admin A cannot open tenant B's call — 404, not a leak.
+    assert.throws(
+      () => service.getCallDetail(callB.id, adminA),
       /Call not found/
     )
   })
@@ -642,10 +714,12 @@ async function main() {
         './repositories/groupRepository.js'
       )
       const { userRepository } = await import('./repositories/userRepository.js')
+      const { ensurePrimaryTenant } = await import('./db/client.js')
       type SsoIdentity = import('./providers/auth/types.js').SsoIdentity
       type SsoProvider = import('./providers/auth/types.js').SsoProvider
 
-      const opsGroup = groupRepository.create({ name: 'Ops' })
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const opsGroup = groupRepository.create({ name: 'Ops', tenantId })
       groupRepository.setMappings([
         { externalName: 'ops', groupId: opsGroup.id },
       ])

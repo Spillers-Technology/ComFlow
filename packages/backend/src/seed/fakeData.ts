@@ -51,7 +51,7 @@ const seedCalls: SeedCall[] = [
   },
 ]
 
-export function seedFakeData() {
+export function seedFakeData(tenantId: string) {
   const count = db.prepare('SELECT COUNT(*) as count FROM calls').get() as {
     count: number
   }
@@ -62,13 +62,13 @@ export function seedFakeData() {
       id, telephony_call_id, source, caller_name, company, callback_number,
       intent, urgency, summary, transcript, raw_transcript, status,
       assigned_queue, recording_status, recording_path, recording_mime_type,
-      reviewed_at, created_at, updated_at
+      reviewed_at, tenant_id, created_at, updated_at
     )
     VALUES (
       @id, @telephony_call_id, @source, @caller_name, @company, @callback_number,
       @intent, @urgency, @summary, @transcript, @raw_transcript, @status,
       @assigned_queue, @recording_status, @recording_path, @recording_mime_type,
-      @reviewed_at, @created_at, @updated_at
+      @reviewed_at, @tenant_id, @created_at, @updated_at
     )
   `)
 
@@ -114,6 +114,7 @@ export function seedFakeData() {
       recording_path: recordingPath,
       recording_mime_type: recordingMimeType,
       reviewed_at: seed.status === 'new' ? null : createdAt,
+      tenant_id: tenantId,
       created_at: createdAt,
       updated_at: createdAt,
     })

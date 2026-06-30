@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import { config } from '../config.js'
 
@@ -141,11 +142,25 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
 
+  -- Multi-tenancy (3.0): a tenant is a customer org (or a single paid user). The
+  -- platform owner sees all tenants; an org-admin/member is scoped to exactly one.
+  -- Every customer-owned row carries tenant_id so isolation is enforced in queries,
+  -- not by convention.
+  CREATE TABLE IF NOT EXISTS tenants (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL UNIQUE,
+    plan TEXT NOT NULL DEFAULT 'free',
+    status TEXT NOT NULL DEFAULT 'active',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
   -- RBAC (M3): groups grant mailbox visibility. Admins see everything; members
   -- see only the mailboxes their groups grant.
   CREATE TABLE IF NOT EXISTS groups (
     id TEXT PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
     description TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -216,3 +231,58 @@ addColumnIfMissing('calls', 'email_notified_at', 'TEXT')
 addColumnIfMissing('calls', 'reviewed_by', 'TEXT')
 // Links a local user row to an external SSO identity (subject/nameID).
 addColumnIfMissing('users', 'external_id', 'TEXT')
+
+// Multi-tenancy (3.0): every customer-owned table gets a tenant_id. Added as a
+// nullable column first so existing databases migrate cleanly, then backfilled
+// onto a single "primary" tenant below.
+const TENANT_SCOPED_TABLES = [
+  'users',
+  'mailboxes',
+  'calls',
+  'groups',
+  'api_keys',
+  'scheduled_calls',
+  'audio_prompts',
+] as const
+
+for (const table of TENANT_SCOPED_TABLES) {
+  addColumnIfMissing(table, 'tenant_id', 'TEXT')
+}
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_calls_tenant ON calls(tenant_id);
+  CREATE INDEX IF NOT EXISTS idx_mailboxes_tenant ON mailboxes(tenant_id);
+  CREATE INDEX IF NOT EXISTS idx_users_tenant ON users(tenant_id);
+`)
+
+/**
+ * Ensure a single "primary" tenant exists and that every pre-tenancy row is
+ * attributed to it. Idempotent: safe to run on every boot. Returns the primary
+ * tenant id so bootstrap (config/app) can attach the first admin + mailbox.
+ */
+export function ensurePrimaryTenant(defaults: {
+  name: string
+  slug: string
+}): string {
+  const existing = db
+    .prepare('SELECT id FROM tenants ORDER BY datetime(created_at) ASC LIMIT 1')
+    .get() as { id: string } | undefined
+
+  let tenantId = existing?.id
+  if (!tenantId) {
+    const now = new Date().toISOString()
+    tenantId = randomUUID()
+    db.prepare(`
+      INSERT INTO tenants (id, name, slug, plan, status, created_at, updated_at)
+      VALUES (@id, @name, @slug, 'free', 'active', @now, @now)
+    `).run({ id: tenantId, name: defaults.name, slug: defaults.slug, now })
+  }
+
+  for (const table of TENANT_SCOPED_TABLES) {
+    db.prepare(
+      `UPDATE ${table} SET tenant_id = ? WHERE tenant_id IS NULL`
+    ).run(tenantId)
+  }
+
+  return tenantId
+}

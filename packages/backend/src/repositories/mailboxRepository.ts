@@ -12,6 +12,7 @@ type MailboxRow = {
   number: string | null
   greeting_prompt_id: string | null
   sip_account_ref: string | null
+  tenant_id: string | null
   created_at: string
   updated_at: string
 }
@@ -20,6 +21,14 @@ type MailboxDefaults = {
   name: string
   number: string | null
   sipAccountRef: string | null
+}
+
+/** The tenant a mailbox belongs to (used to stamp inbound calls). */
+export function mailboxTenantId(id: string): string | null {
+  const row = db
+    .prepare('SELECT tenant_id FROM mailboxes WHERE id = ?')
+    .get(id) as { tenant_id: string | null } | undefined
+  return row?.tenant_id ?? null
 }
 
 function mapRow(row: MailboxRow): Mailbox {
@@ -35,10 +44,12 @@ function mapRow(row: MailboxRow): Mailbox {
 }
 
 export const mailboxRepository = {
-  list(): Mailbox[] {
+  list(tenantId: string): Mailbox[] {
     const rows = db
-      .prepare('SELECT * FROM mailboxes ORDER BY datetime(created_at) ASC')
-      .all() as MailboxRow[]
+      .prepare(
+        'SELECT * FROM mailboxes WHERE tenant_id = ? ORDER BY datetime(created_at) ASC'
+      )
+      .all(tenantId) as MailboxRow[]
     return rows.map(mapRow)
   },
 
@@ -49,10 +60,10 @@ export const mailboxRepository = {
     return row ? mapRow(row) : null
   },
 
-  count(): number {
-    const row = db.prepare('SELECT COUNT(*) as count FROM mailboxes').get() as {
-      count: number
-    }
+  count(tenantId: string): number {
+    const row = db
+      .prepare('SELECT COUNT(*) as count FROM mailboxes WHERE tenant_id = ?')
+      .get(tenantId) as { count: number }
     return row.count
   },
 
@@ -75,6 +86,7 @@ export const mailboxRepository = {
     number: string | null
     sipAccountRef: string | null
     greetingPromptId: string | null
+    tenantId: string
   }): Mailbox {
     const now = new Date().toISOString()
     const row: MailboxRow = {
@@ -83,14 +95,15 @@ export const mailboxRepository = {
       number: input.number,
       greeting_prompt_id: input.greetingPromptId,
       sip_account_ref: input.sipAccountRef,
+      tenant_id: input.tenantId,
       created_at: now,
       updated_at: now,
     }
     db.prepare(`
       INSERT INTO mailboxes (
-        id, name, number, greeting_prompt_id, sip_account_ref, created_at, updated_at
+        id, name, number, greeting_prompt_id, sip_account_ref, tenant_id, created_at, updated_at
       )
-      VALUES (@id, @name, @number, @greeting_prompt_id, @sip_account_ref, @created_at, @updated_at)
+      VALUES (@id, @name, @number, @greeting_prompt_id, @sip_account_ref, @tenant_id, @created_at, @updated_at)
     `).run(row)
     return mapRow(row)
   },
@@ -100,17 +113,19 @@ export const mailboxRepository = {
     return result.changes > 0
   },
 
-  /** The single mailbox in the current model; the earliest-created one. */
-  getDefault(): Mailbox | null {
+  /** A tenant's default mailbox; the earliest-created one in that tenant. */
+  getDefault(tenantId: string): Mailbox | null {
     const row = db
-      .prepare('SELECT * FROM mailboxes ORDER BY datetime(created_at) ASC LIMIT 1')
-      .get() as MailboxRow | undefined
+      .prepare(
+        'SELECT * FROM mailboxes WHERE tenant_id = ? ORDER BY datetime(created_at) ASC LIMIT 1'
+      )
+      .get(tenantId) as MailboxRow | undefined
     return row ? mapRow(row) : null
   },
 
-  /** Create the default mailbox on first boot so calls always have a home. */
-  ensureDefault(defaults: MailboxDefaults): Mailbox {
-    const existing = this.getDefault()
+  /** Create a tenant's default mailbox on first need so calls have a home. */
+  ensureDefault(defaults: MailboxDefaults, tenantId: string): Mailbox {
+    const existing = this.getDefault(tenantId)
     if (existing) return existing
 
     const now = new Date().toISOString()
@@ -120,14 +135,15 @@ export const mailboxRepository = {
       number: defaults.number,
       greeting_prompt_id: null,
       sip_account_ref: defaults.sipAccountRef,
+      tenant_id: tenantId,
       created_at: now,
       updated_at: now,
     }
     db.prepare(`
       INSERT INTO mailboxes (
-        id, name, number, greeting_prompt_id, sip_account_ref, created_at, updated_at
+        id, name, number, greeting_prompt_id, sip_account_ref, tenant_id, created_at, updated_at
       )
-      VALUES (@id, @name, @number, @greeting_prompt_id, @sip_account_ref, @created_at, @updated_at)
+      VALUES (@id, @name, @number, @greeting_prompt_id, @sip_account_ref, @tenant_id, @created_at, @updated_at)
     `).run(row)
     return mapRow(row)
   },

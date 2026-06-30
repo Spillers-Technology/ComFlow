@@ -15,7 +15,8 @@ function AppGate() {
   const { user, authRequired, loading } = useAuth()
   // Open mode (auth not enforced) grants the synthetic admin full access, so
   // the admin UI should show there too — matching the backend's behavior.
-  const isAdmin = !authRequired || user?.role === 'admin'
+  const isAdmin =
+    !authRequired || user?.role === 'admin' || user?.role === 'owner'
 
   if (loading) {
     return (

@@ -42,39 +42,39 @@ export type ComflowMcpDeps = {
     addNote(user: User, id: string, input: unknown): unknown
   }
   scheduledCalls: {
-    list(): unknown
-    create(input: unknown): unknown
-    cancel(id: string): unknown
+    list(user: User): unknown
+    create(user: User, input: unknown): unknown
+    cancel(user: User, id: string): unknown
   }
   prompts: {
-    list(kind?: 'greeting' | 'outbound'): unknown
-    upload(input: unknown): Promise<unknown>
-    delete(id: string): Promise<void>
+    list(user: User, kind?: 'greeting' | 'outbound'): unknown
+    upload(user: User, input: unknown): Promise<unknown>
+    delete(user: User, id: string): Promise<void>
   }
   mailboxes: {
     list(user: User): unknown
-    create(input: unknown): unknown
-    update(id: string, input: unknown): unknown
-    delete(id: string): void
+    create(user: User, input: unknown): unknown
+    update(user: User, id: string, input: unknown): unknown
+    delete(user: User, id: string): void
   }
   settings: {
     get(): Promise<unknown> | unknown
     update(input: { engines?: unknown; sip?: unknown }): Promise<unknown> | unknown
   }
   users: {
-    list(): unknown
-    create(input: unknown): unknown
-    update(id: string, input: unknown): unknown
-    resetPassword(id: string, password: string): void
+    list(user: User): unknown
+    create(user: User, input: unknown): unknown
+    update(user: User, id: string, input: unknown): unknown
+    resetPassword(user: User, id: string, password: string): void
     delete(id: string, currentUser: User): void
   }
   groups: {
-    list(): unknown
-    create(input: unknown): unknown
-    update(id: string, input: unknown): unknown
-    delete(id: string): void
-    setMembers(id: string, userIds: string[]): unknown
-    setMailboxes(id: string, mailboxIds: string[]): unknown
+    list(user: User): unknown
+    create(user: User, input: unknown): unknown
+    update(user: User, id: string, input: unknown): unknown
+    delete(user: User, id: string): void
+    setMembers(user: User, id: string, userIds: string[]): unknown
+    setMailboxes(user: User, id: string, mailboxIds: string[]): unknown
   }
   recordings: {
     list(user: User): RecordingResource[]
@@ -106,7 +106,7 @@ function noContentResult(message: string): ToolResult {
 }
 
 function requireAdmin(user: User) {
-  if (user.role !== 'admin') {
+  if (user.role !== 'admin' && user.role !== 'owner') {
     throw new Error('Administrator access required.')
   }
 }
@@ -191,7 +191,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
       description: 'List scheduled calls.',
       annotations: { readOnlyHint: true },
     },
-    () => jsonResult({ items: deps.scheduledCalls.list() })
+    () => jsonResult({ items: deps.scheduledCalls.list(user) })
   )
 
   server.registerTool(
@@ -200,7 +200,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
       description: 'Create a scheduled outbound call.',
       inputSchema: CreateScheduledCallRequestSchema,
     },
-    args => jsonResult({ scheduledCall: deps.scheduledCalls.create(args) })
+    args => jsonResult({ scheduledCall: deps.scheduledCalls.create(user, args) })
   )
 
   server.registerTool(
@@ -209,7 +209,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
       description: 'Cancel a scheduled outbound call.',
       inputSchema: IdInput,
     },
-    args => jsonResult({ scheduledCall: deps.scheduledCalls.cancel(args.id) })
+    args => jsonResult({ scheduledCall: deps.scheduledCalls.cancel(user, args.id) })
   )
 
   server.registerTool(
@@ -221,7 +221,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
       },
       annotations: { readOnlyHint: true },
     },
-    args => jsonResult({ items: deps.prompts.list(args.kind) })
+    args => jsonResult({ items: deps.prompts.list(user, args.kind) })
   )
 
   server.registerTool(
@@ -230,7 +230,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
       description: 'Upload a base64-encoded audio prompt.',
       inputSchema: CreateAudioPromptRequestSchema,
     },
-    async args => jsonResult({ prompt: await deps.prompts.upload(args) })
+    async args => jsonResult({ prompt: await deps.prompts.upload(user, args) })
   )
 
   server.registerTool(
@@ -240,7 +240,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
       inputSchema: IdInput,
     },
     async args => {
-      await deps.prompts.delete(args.id)
+      await deps.prompts.delete(user, args.id)
       return noContentResult('Prompt deleted.')
     }
   )
@@ -262,7 +262,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     args => {
       requireAdmin(user)
-      return jsonResult({ mailbox: deps.mailboxes.create(args) })
+      return jsonResult({ mailbox: deps.mailboxes.create(user, args) })
     }
   )
 
@@ -277,7 +277,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     args => {
       requireAdmin(user)
-      return jsonResult({ mailbox: deps.mailboxes.update(args.id, args.patch) })
+      return jsonResult({ mailbox: deps.mailboxes.update(user, args.id, args.patch) })
     }
   )
 
@@ -289,7 +289,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     args => {
       requireAdmin(user)
-      deps.mailboxes.delete(args.id)
+      deps.mailboxes.delete(user, args.id)
       return noContentResult('Mailbox deleted.')
     }
   )
@@ -329,7 +329,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     () => {
       requireAdmin(user)
-      return jsonResult({ items: deps.users.list() })
+      return jsonResult({ items: deps.users.list(user) })
     }
   )
 
@@ -341,7 +341,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     args => {
       requireAdmin(user)
-      return jsonResult({ user: deps.users.create(args) })
+      return jsonResult({ user: deps.users.create(user, args) })
     }
   )
 
@@ -356,7 +356,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     args => {
       requireAdmin(user)
-      return jsonResult({ user: deps.users.update(args.id, args.patch) })
+      return jsonResult({ user: deps.users.update(user, args.id, args.patch) })
     }
   )
 
@@ -371,7 +371,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     args => {
       requireAdmin(user)
-      deps.users.resetPassword(args.id, args.password)
+      deps.users.resetPassword(user, args.id, args.password)
       return noContentResult('Password reset.')
     }
   )
@@ -397,7 +397,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     () => {
       requireAdmin(user)
-      return jsonResult({ items: deps.groups.list() })
+      return jsonResult({ items: deps.groups.list(user) })
     }
   )
 
@@ -409,7 +409,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     args => {
       requireAdmin(user)
-      return jsonResult({ group: deps.groups.create(args) })
+      return jsonResult({ group: deps.groups.create(user, args) })
     }
   )
 
@@ -424,7 +424,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     args => {
       requireAdmin(user)
-      return jsonResult({ group: deps.groups.update(args.id, args.patch) })
+      return jsonResult({ group: deps.groups.update(user, args.id, args.patch) })
     }
   )
 
@@ -436,7 +436,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     args => {
       requireAdmin(user)
-      deps.groups.delete(args.id)
+      deps.groups.delete(user, args.id)
       return noContentResult('Group deleted.')
     }
   )
@@ -452,7 +452,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     },
     args => {
       requireAdmin(user)
-      return jsonResult({ group: deps.groups.setMembers(args.id, args.userIds) })
+      return jsonResult({ group: deps.groups.setMembers(user, args.id, args.userIds) })
     }
   )
 
@@ -468,7 +468,7 @@ function createServer(user: User, deps: ComflowMcpDeps) {
     args => {
       requireAdmin(user)
       return jsonResult({
-        group: deps.groups.setMailboxes(args.id, args.mailboxIds),
+        group: deps.groups.setMailboxes(user, args.id, args.mailboxIds),
       })
     }
   )

@@ -1,5 +1,8 @@
 import { Router } from 'express'
-import { CreateScheduledCallRequestSchema } from '../../../shared/src/index.js'
+import {
+  CreateScheduledCallRequestSchema,
+  User,
+} from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
 import { ScheduledCallService } from '../services/scheduledCallService.js'
@@ -18,15 +21,17 @@ export function createScheduledCallsRouter(service: ScheduledCallService) {
   router.get(
     '/',
     asyncHandler((_request, response) => {
-      response.json({ items: service.list() })
+      const user = response.locals.user as User
+      response.json({ items: service.list(user.tenantId) })
     })
   )
 
   router.post(
     '/',
     asyncHandler((request, response) => {
+      const user = response.locals.user as User
       const input = parseBody(CreateScheduledCallRequestSchema, request.body)
-      const scheduledCall = service.create(input)
+      const scheduledCall = service.create(input, user.tenantId)
       response.status(201).json({ scheduledCall })
     })
   )
@@ -34,7 +39,8 @@ export function createScheduledCallsRouter(service: ScheduledCallService) {
   router.delete(
     '/:id',
     asyncHandler((request, response) => {
-      const scheduledCall = service.cancel(paramId(request.params.id))
+      const user = response.locals.user as User
+      const scheduledCall = service.cancel(paramId(request.params.id), user.tenantId)
       response.json({ scheduledCall })
     })
   )
@@ -42,7 +48,11 @@ export function createScheduledCallsRouter(service: ScheduledCallService) {
   router.get(
     '/:id/answer-audio',
     asyncHandler((request, response) => {
-      const { absolutePath } = service.getAnswerAudio(paramId(request.params.id))
+      const user = response.locals.user as User
+      const { absolutePath } = service.getAnswerAudio(
+        paramId(request.params.id),
+        user.tenantId
+      )
       response.type('audio/wav')
       response.sendFile(absolutePath)
     })

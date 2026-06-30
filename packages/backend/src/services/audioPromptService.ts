@@ -29,11 +29,14 @@ function toApi(record: AudioPromptRecord): AudioPrompt {
  * greeting (inbound) or message/question (outbound) instead of TTS.
  */
 export class AudioPromptService {
-  list(kind?: 'greeting' | 'outbound'): AudioPrompt[] {
-    return audioPromptRepository.list(kind).map(toApi)
+  list(tenantId: string, kind?: 'greeting' | 'outbound'): AudioPrompt[] {
+    return audioPromptRepository.list(tenantId, kind).map(toApi)
   }
 
-  async create(input: CreateAudioPromptRequest): Promise<AudioPrompt> {
+  async create(
+    input: CreateAudioPromptRequest,
+    tenantId: string
+  ): Promise<AudioPrompt> {
     const id = randomUUID()
     const relativePath = path.join(
       'prompts',
@@ -48,13 +51,14 @@ export class AudioPromptService {
       kind: input.kind,
       audioPath: relativePath,
       mimeType: input.mimeType,
+      tenantId,
     })
     return toApi(record)
   }
 
-  async delete(id: string): Promise<void> {
+  async delete(id: string, tenantId: string): Promise<void> {
     const record = audioPromptRepository.getById(id)
-    if (!record) {
+    if (!record || audioPromptRepository.tenantIdOf(id) !== tenantId) {
       throw new HttpError(404, 'Audio prompt not found.')
     }
     await fs
@@ -63,9 +67,9 @@ export class AudioPromptService {
     audioPromptRepository.delete(id)
   }
 
-  getAudio(id: string) {
+  getAudio(id: string, tenantId: string) {
     const record = audioPromptRepository.getById(id)
-    if (!record) {
+    if (!record || audioPromptRepository.tenantIdOf(id) !== tenantId) {
       throw new HttpError(404, 'Audio prompt not found.')
     }
     const absolutePath = path.resolve(config.dataDir, record.audioPath)

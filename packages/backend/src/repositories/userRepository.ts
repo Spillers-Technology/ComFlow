@@ -10,6 +10,7 @@ type UserRow = {
   role: UserRole
   auth_provider: string
   external_id: string | null
+  tenant_id: string
   created_at: string
   updated_at: string
 }
@@ -26,6 +27,7 @@ function mapRow(row: UserRow): UserRecord {
     displayName: row.display_name,
     role: row.role,
     authProvider: row.auth_provider,
+    tenantId: row.tenant_id,
   })
   return { ...api, passwordHash: row.password_hash, externalId: row.external_id }
 }
@@ -38,10 +40,12 @@ export const userRepository = {
     return row.count
   },
 
-  list(): UserRecord[] {
+  list(tenantId: string): UserRecord[] {
     const rows = db
-      .prepare('SELECT * FROM users ORDER BY lower(email) ASC')
-      .all() as UserRow[]
+      .prepare(
+        'SELECT * FROM users WHERE tenant_id = ? ORDER BY lower(email) ASC'
+      )
+      .all(tenantId) as UserRow[]
     return rows.map(mapRow)
   },
 
@@ -64,6 +68,7 @@ export const userRepository = {
     displayName: string | null
     passwordHash: string | null
     role: UserRole
+    tenantId: string
     authProvider?: string
     externalId?: string | null
   }): UserRecord {
@@ -76,14 +81,15 @@ export const userRepository = {
       role: input.role,
       auth_provider: input.authProvider ?? 'local',
       external_id: input.externalId ?? null,
+      tenant_id: input.tenantId,
       created_at: now,
       updated_at: now,
     }
     db.prepare(`
       INSERT INTO users (
-        id, email, display_name, password_hash, role, auth_provider, external_id, created_at, updated_at
+        id, email, display_name, password_hash, role, auth_provider, external_id, tenant_id, created_at, updated_at
       )
-      VALUES (@id, @email, @display_name, @password_hash, @role, @auth_provider, @external_id, @created_at, @updated_at)
+      VALUES (@id, @email, @display_name, @password_hash, @role, @auth_provider, @external_id, @tenant_id, @created_at, @updated_at)
     `).run(row)
     return mapRow(row)
   },
@@ -143,10 +149,13 @@ export const userRepository = {
     return result.changes > 0
   },
 
-  countAdmins(): number {
+  /** Admins within a tenant — used by the last-admin guard, scoped per tenant. */
+  countAdmins(tenantId: string): number {
     const row = db
-      .prepare("SELECT COUNT(*) as count FROM users WHERE role = 'admin'")
-      .get() as { count: number }
+      .prepare(
+        "SELECT COUNT(*) as count FROM users WHERE role = 'admin' AND tenant_id = ?"
+      )
+      .get(tenantId) as { count: number }
     return row.count
   },
 
@@ -161,6 +170,7 @@ export const userRepository = {
     displayName: string | null
     externalId: string
     authProvider: string
+    tenantId: string
   }): UserRecord {
     const existing = this.getByEmail(input.email)
     if (existing) {
@@ -186,6 +196,7 @@ export const userRepository = {
       displayName: input.displayName,
       passwordHash: null,
       role: 'member',
+      tenantId: input.tenantId,
       authProvider: input.authProvider,
       externalId: input.externalId,
     })

@@ -27,16 +27,19 @@ export class CallIngestionService {
   ) {}
 
   async createInboundCall(input: InboundTelephonyWebhookInput) {
+    // Route by dialed DID / receiving SIP account, else the primary tenant's
+    // default mailbox. The match pins both the mailbox and its owning tenant.
+    const routing = this.mailboxService.resolveInbound({
+      toNumber: input.toNumber,
+      accountLabel: input.accountLabel,
+    })
     const call = callRepository.createInitial({
       telephonyCallId: input.telephonyCallId,
       source: input.source,
       callbackNumber: input.fromNumber,
       transcript: input.transcript,
-      // Route by dialed DID / receiving SIP account, else the default mailbox.
-      mailboxId: this.mailboxService.resolveInbound({
-        toNumber: input.toNumber,
-        accountLabel: input.accountLabel,
-      }),
+      mailboxId: routing.mailboxId,
+      tenantId: routing.tenantId,
     })
 
     if (input.transcript) {

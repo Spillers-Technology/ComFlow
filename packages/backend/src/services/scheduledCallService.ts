@@ -46,11 +46,11 @@ export class ScheduledCallService {
     private readonly audioPromptService: AudioPromptService
   ) {}
 
-  list(): ScheduledCall[] {
-    return scheduledCallRepository.list().map(toApi)
+  list(tenantId: string): ScheduledCall[] {
+    return scheduledCallRepository.list(tenantId).map(toApi)
   }
 
-  create(input: CreateScheduledCallRequest): ScheduledCall {
+  create(input: CreateScheduledCallRequest, tenantId: string): ScheduledCall {
     const record = scheduledCallRepository.create({
       toNumber: input.toNumber,
       scheduledAt: input.scheduledAt,
@@ -58,13 +58,14 @@ export class ScheduledCallService {
       questionText: input.questionText ?? '',
       messagePromptId: input.messageAudioPromptId ?? null,
       questionPromptId: input.questionAudioPromptId ?? null,
+      tenantId,
     })
     return toApi(record)
   }
 
-  cancel(id: string): ScheduledCall {
+  cancel(id: string, tenantId: string): ScheduledCall {
     const existing = scheduledCallRepository.getById(id)
-    if (!existing) {
+    if (!existing || scheduledCallRepository.tenantIdOf(id) !== tenantId) {
       throw new HttpError(404, 'Scheduled call not found.')
     }
     if (existing.status !== 'scheduled') {
@@ -74,9 +75,13 @@ export class ScheduledCallService {
     return toApi(updated!)
   }
 
-  getAnswerAudio(id: string) {
+  getAnswerAudio(id: string, tenantId: string) {
     const record = scheduledCallRepository.getById(id)
-    if (!record || !record.answerRecordingPath) {
+    if (
+      !record ||
+      scheduledCallRepository.tenantIdOf(id) !== tenantId ||
+      !record.answerRecordingPath
+    ) {
       throw new HttpError(404, 'Answer audio not found.')
     }
     const absolutePath = path.resolve(config.dataDir, record.answerRecordingPath)

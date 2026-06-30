@@ -5,10 +5,12 @@ import {
   SetGroupMembersRequestSchema,
   SetSsoGroupMappingsRequestSchema,
   UpdateGroupRequestSchema,
+  User,
 } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
 import { groupRepository } from '../repositories/groupRepository.js'
+import { mailboxRepository } from '../repositories/mailboxRepository.js'
 import { userRepository } from '../repositories/userRepository.js'
 import { toApiUser } from '../services/authService.js'
 
@@ -21,13 +23,23 @@ function requireParam(value: string | string[] | undefined, label: string) {
 export function createGroupsRouter() {
   const router = Router()
 
+  // Load a group, 404ing if it's missing or owned by another tenant — so
+  // tenant isolation holds even for direct id access.
+  function requireGroupInTenant(id: string, tenantId: string) {
+    if (groupRepository.tenantIdOf(id) !== tenantId) {
+      throw new HttpError(404, 'Group not found.')
+    }
+  }
+
   router.get('/', (_request, response) => {
-    response.json({ items: groupRepository.listDetail() })
+    const user = response.locals.user as User
+    response.json({ items: groupRepository.listDetail(user.tenantId) })
   })
 
-  // Assignable users for the membership picker.
+  // Assignable users for the membership picker (this tenant only).
   router.get('/users', (_request, response) => {
-    response.json({ items: userRepository.list().map(toApiUser) })
+    const user = response.locals.user as User
+    response.json({ items: userRepository.list(user.tenantId).map(toApiUser) })
   })
 
   router.get('/mappings', (_request, response) => {
@@ -46,8 +58,9 @@ export function createGroupsRouter() {
   router.post(
     '/',
     asyncHandler((request, response) => {
+      const user = response.locals.user as User
       const input = parseBody(CreateGroupRequestSchema, request.body)
-      const group = groupRepository.create(input)
+      const group = groupRepository.create({ ...input, tenantId: user.tenantId })
       response.status(201).json({ group: groupRepository.getDetail(group.id) })
     })
   )
@@ -55,7 +68,9 @@ export function createGroupsRouter() {
   router.patch(
     '/:id',
     asyncHandler((request, response) => {
+      const user = response.locals.user as User
       const id = requireParam(request.params.id, 'Group id')
+      requireGroupInTenant(id, user.tenantId)
       const input = parseBody(UpdateGroupRequestSchema, request.body)
       const group = groupRepository.update(id, input)
       if (!group) throw new HttpError(404, 'Group not found.')
@@ -66,7 +81,9 @@ export function createGroupsRouter() {
   router.delete(
     '/:id',
     asyncHandler((request, response) => {
+      const user = response.locals.user as User
       const id = requireParam(request.params.id, 'Group id')
+      requireGroupInTenant(id, user.tenantId)
       if (!groupRepository.remove(id)) {
         throw new HttpError(404, 'Group not found.')
       }
@@ -77,10 +94,18 @@ export function createGroupsRouter() {
   router.put(
     '/:id/members',
     asyncHandler((request, response) => {
+      const user = response.locals.user as User
       const id = requireParam(request.params.id, 'Group id')
-      if (!groupRepository.getById(id)) throw new HttpError(404, 'Group not found.')
+      requireGroupInTenant(id, user.tenantId)
       const input = parseBody(SetGroupMembersRequestSchema, request.body)
-      groupRepository.setMembers(id, input.userIds)
+      // Only users in this tenant may be added — drop any foreign ids.
+      const allowed = new Set(
+        userRepository.list(user.tenantId).map(member => member.id)
+      )
+      groupRepository.setMembers(
+        id,
+        input.userIds.filter(userId => allowed.has(userId))
+      )
       response.json({ group: groupRepository.getDetail(id) })
     })
   )
@@ -88,10 +113,18 @@ export function createGroupsRouter() {
   router.put(
     '/:id/mailboxes',
     asyncHandler((request, response) => {
+      const user = response.locals.user as User
       const id = requireParam(request.params.id, 'Group id')
-      if (!groupRepository.getById(id)) throw new HttpError(404, 'Group not found.')
+      requireGroupInTenant(id, user.tenantId)
       const input = parseBody(SetGroupMailboxesRequestSchema, request.body)
-      groupRepository.setMailboxes(id, input.mailboxIds)
+      // Only mailboxes in this tenant may be granted — drop any foreign ids.
+      const allowed = new Set(
+        mailboxRepository.list(user.tenantId).map(mailbox => mailbox.id)
+      )
+      groupRepository.setMailboxes(
+        id,
+        input.mailboxIds.filter(mailboxId => allowed.has(mailboxId))
+      )
       response.json({ group: groupRepository.getDetail(id) })
     })
   )

@@ -1,5 +1,6 @@
 import { LoginResponse, SsoProviderInfo } from '../../../shared/src/index.js'
 import { config } from '../config.js'
+import { ensurePrimaryTenant } from '../db/client.js'
 import { HttpError } from '../lib/errors.js'
 import { signSessionToken } from '../lib/token.js'
 import { getSsoProviders } from '../providers/auth/ssoProviders.js'
@@ -71,11 +72,14 @@ export class SsoService {
       codeVerifier: persisted.codeVerifier,
     })
 
+    // SSO provisions into the primary tenant — hosted SSO is the operator's own
+    // org. Per-tenant SSO is a future enhancement.
     const user = userRepository.upsertBySsoIdentity({
       email: identity.email,
       displayName: identity.displayName,
       externalId: identity.externalId,
       authProvider: provider.id,
+      tenantId: ensurePrimaryTenant(config.defaultTenant),
     })
 
     // Promote allowlisted emails to admin on every login; never demote here.

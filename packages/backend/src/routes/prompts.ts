@@ -2,6 +2,7 @@ import { Router } from 'express'
 import {
   AudioPromptKindSchema,
   CreateAudioPromptRequestSchema,
+  User,
 } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
@@ -21,18 +22,20 @@ export function createPromptsRouter(service: AudioPromptService) {
   router.get(
     '/',
     asyncHandler((request, response) => {
+      const user = response.locals.user as User
       const kind = request.query.kind
         ? AudioPromptKindSchema.parse(request.query.kind)
         : undefined
-      response.json({ items: service.list(kind) })
+      response.json({ items: service.list(user.tenantId, kind) })
     })
   )
 
   router.post(
     '/',
     asyncHandler(async (request, response) => {
+      const user = response.locals.user as User
       const input = parseBody(CreateAudioPromptRequestSchema, request.body)
-      const prompt = await service.create(input)
+      const prompt = await service.create(input, user.tenantId)
       response.status(201).json({ prompt })
     })
   )
@@ -40,7 +43,8 @@ export function createPromptsRouter(service: AudioPromptService) {
   router.delete(
     '/:id',
     asyncHandler(async (request, response) => {
-      await service.delete(paramId(request.params.id))
+      const user = response.locals.user as User
+      await service.delete(paramId(request.params.id), user.tenantId)
       response.status(204).end()
     })
   )
@@ -48,8 +52,10 @@ export function createPromptsRouter(service: AudioPromptService) {
   router.get(
     '/:id/audio',
     asyncHandler((request, response) => {
+      const user = response.locals.user as User
       const { absolutePath, mimeType } = service.getAudio(
-        paramId(request.params.id)
+        paramId(request.params.id),
+        user.tenantId
       )
       response.type(mimeType)
       response.sendFile(absolutePath)
