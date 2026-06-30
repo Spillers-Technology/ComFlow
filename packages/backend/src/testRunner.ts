@@ -783,6 +783,44 @@ async function main() {
     assert.equal(concurrency.tryBegin(tenantId, 'c3'), true) // freed a slot
   })
 
+  await runTest('stripe wallet credits on webhook and draws down on usage', async () => {
+    const { ensurePrimaryTenant } = await getModules()
+    const { BillingService } = await import('./services/billingService.js')
+    const { UsageService } = await import('./services/usageService.js')
+
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    const billing = new BillingService()
+    const usage = new UsageService()
+
+    // No prior test credits this wallet, so creditCents starts at 0.
+    assert.equal(billing.wallet(tenantId).creditCents, 0)
+
+    // A verified payment webhook credits the wallet (idempotent on event id).
+    const event = JSON.stringify({
+      id: 'evt_1',
+      type: 'payment_succeeded',
+      tenantId,
+      amountCents: 5000,
+    })
+    billing.handleWebhook(event, undefined)
+    billing.handleWebhook(event, undefined) // replay must not double-credit
+    assert.equal(billing.wallet(tenantId).creditCents, 5000)
+
+    // balance is always credit minus billed usage.
+    const before = billing.wallet(tenantId)
+    assert.equal(before.balanceCents, 5000 - before.billedCents)
+
+    // Recording usage draws the balance down by the newly billed amount.
+    usage.recordInboundMinutes(tenantId, 10, 'c')
+    const after = billing.wallet(tenantId)
+    assert.ok(after.billedCents > before.billedCents)
+    assert.equal(after.balanceCents, 5000 - after.billedCents)
+
+    // A bad webhook body is ignored, not credited.
+    billing.handleWebhook(JSON.stringify({ type: 'noise' }), undefined)
+    assert.equal(billing.wallet(tenantId).creditCents, 5000)
+  })
+
   await runTest('requireAdmin blocks non-admins', async () => {
     const { requireAdmin } = await import('./middleware/requireAdmin.js')
 

@@ -111,6 +111,25 @@ export const config = {
       ),
     },
   },
+  // Stripe wallet billing. When a secret key is present the real adapter is
+  // used; otherwise a `fake` adapter backs dev/tests (no network, no signatures).
+  billing: {
+    provider: readOptionalEnv('COMFLOW_BILLING_PROVIDER'),
+    // Wallet balance is only enforced when real billing is in play (hosted
+    // mode). Self-host/dev (fake provider) never gates on balance.
+    enforced:
+      readOptionalEnv('COMFLOW_BILLING_PROVIDER') === 'stripe' ||
+      Boolean(readOptionalEnv('STRIPE_SECRET_KEY')),
+    stripeSecretKey: readOptionalEnv('STRIPE_SECRET_KEY'),
+    stripeWebhookSecret: readOptionalEnv('STRIPE_WEBHOOK_SECRET'),
+    // Where Stripe Checkout returns the customer after pay/cancel.
+    successUrl:
+      readOptionalEnv('STRIPE_SUCCESS_URL') ??
+      `${process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173'}/billing?status=success`,
+    cancelUrl:
+      readOptionalEnv('STRIPE_CANCEL_URL') ??
+      `${process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173'}/billing?status=cancel`,
+  },
   secrets: {
     openaiApiKey: readEnv('COMFLOW_OPENAI_API_KEY', 'OPENAI_API_KEY'),
     anthropicApiKey: readEnv('COMFLOW_ANTHROPIC_API_KEY', 'ANTHROPIC_API_KEY'),

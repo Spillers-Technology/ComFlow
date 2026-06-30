@@ -187,6 +187,24 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  -- Prepaid wallet per tenant. credit_cents is the running total funded via
+  -- Stripe (top-ups + subscription credits); the available balance is
+  -- credit_cents minus aggregated usage_events.billed_cents.
+  CREATE TABLE IF NOT EXISTS tenant_billing (
+    tenant_id TEXT PRIMARY KEY,
+    stripe_customer_id TEXT,
+    subscription_id TEXT,
+    plan TEXT,
+    credit_cents INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL
+  );
+
+  -- Idempotency guard so a replayed Stripe webhook can't double-credit a wallet.
+  CREATE TABLE IF NOT EXISTS billing_events (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL
+  );
+
   -- Per-tenant limits + pricing. markup_bps is basis points over carrier cost
   -- (15000 = 1.5x). A row is created lazily from config defaults.
   CREATE TABLE IF NOT EXISTS tenant_limits (

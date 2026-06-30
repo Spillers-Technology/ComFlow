@@ -5,6 +5,7 @@ import express, { NextFunction, Request, Response } from 'express'
 import { User } from '../../shared/src/index.js'
 import { createComflowMcpRouter } from '../../mcp/src/index.js'
 import { createAuthRouter } from './routes/auth.js'
+import { createBillingRouter } from './routes/billing.js'
 import { createCallsRouter } from './routes/calls.js'
 import { createDidsRouter } from './routes/dids.js'
 import { createGroupsRouter } from './routes/groups.js'
@@ -30,6 +31,7 @@ import { AudioPromptService } from './services/audioPromptService.js'
 import { AuthService } from './services/authService.js'
 import { BaresipManagementService } from './services/baresipManagementService.js'
 import { CallIngestionService } from './services/callIngestionService.js'
+import { BillingService } from './services/billingService.js'
 import { CallReviewService } from './services/callReviewService.js'
 import { DidProvisioningService } from './services/didProvisioningService.js'
 import { UsageService } from './services/usageService.js'
@@ -82,6 +84,7 @@ export function createApp() {
   )
   const didProvisioningService = new DidProvisioningService()
   const usageService = new UsageService()
+  const billingService = new BillingService()
 
   function assertWithinDataDir(filePath: string, directory: string) {
     const resolvedFile = path.resolve(filePath)
@@ -341,6 +344,25 @@ export function createApp() {
       origin: config.frontendOrigin,
     })
   )
+
+  // Stripe webhook needs the raw body for signature verification, so it is
+  // mounted before the JSON body parser.
+  app.post(
+    '/api/webhooks/stripe',
+    express.raw({ type: '*/*' }),
+    (request, response) => {
+      try {
+        billingService.handleWebhook(
+          request.body as Buffer,
+          request.headers['stripe-signature'] as string | undefined
+        )
+        response.json({ received: true })
+      } catch (error) {
+        response.status(400).json({ error: (error as Error).message })
+      }
+    }
+  )
+
   app.use(express.json({ limit: '10mb' }))
 
   // Open endpoints: health, auth, and webhooks (machine-to-machine).
@@ -376,6 +398,7 @@ export function createApp() {
   app.use('/api/groups', requireAuth, requireAdmin, createGroupsRouter())
   app.use('/api/users', requireAuth, requireAdmin, createUsersRouter())
   app.use('/api/usage', requireAuth, createUsageRouter(usageService))
+  app.use('/api/billing', requireAuth, createBillingRouter(billingService))
   app.use('/api/tenants', requireAuth, createTenantsRouter())
 
   // Serve the built frontend (production single-image deploy). API routes above

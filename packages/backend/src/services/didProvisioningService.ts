@@ -8,6 +8,7 @@ import { didRepository } from '../repositories/didRepository.js'
 import { mailboxRepository } from '../repositories/mailboxRepository.js'
 import { tenantLimitsRepository } from '../repositories/tenantLimitsRepository.js'
 import { createSipTrunkProvider, SipTrunkProvider } from '../providers/sip/index.js'
+import { BillingService } from './billingService.js'
 
 /**
  * Orders DIDs from the SIP trunk provider on the fly and binds them to a
@@ -18,7 +19,8 @@ import { createSipTrunkProvider, SipTrunkProvider } from '../providers/sip/index
  */
 export class DidProvisioningService {
   constructor(
-    private readonly provider: SipTrunkProvider = createSipTrunkProvider()
+    private readonly provider: SipTrunkProvider = createSipTrunkProvider(),
+    private readonly billingService: BillingService = new BillingService()
   ) {}
 
   searchDids(input: { country: 'US' | 'CA'; query?: string }): Promise<
@@ -47,6 +49,9 @@ export class DidProvisioningService {
         `DID limit reached (${limits.maxDids}). Upgrade the plan to add more.`
       )
     }
+
+    // A DID rents monthly against the wallet — require funds before ordering.
+    this.billingService.assertHasBalance(tenantId)
 
     // Resolve the target mailbox first so a provider failure leaves no orphan.
     const mailboxId = this.resolveTargetMailbox(tenantId, input)
