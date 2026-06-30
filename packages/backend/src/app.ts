@@ -339,6 +339,11 @@ export function createApp() {
     seedFakeData(primaryTenantId)
   }
 
+  // Charge each active DID's monthly rental (idempotent per number per month),
+  // now and once a day, so wallets reflect rental between usage-page reads.
+  usageService.sweepDidRentals()
+  setInterval(() => usageService.sweepDidRentals(), 24 * 60 * 60 * 1000).unref()
+
   app.use(
     cors({
       origin: config.frontendOrigin,

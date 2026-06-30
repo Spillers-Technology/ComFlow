@@ -783,6 +783,39 @@ async function main() {
     assert.equal(concurrency.tryBegin(tenantId, 'c3'), true) // freed a slot
   })
 
+  await runTest('did rental is charged once per month and draws the wallet', async () => {
+    const { ensurePrimaryTenant } = await getModules()
+    const { DidProvisioningService } = await import(
+      './services/didProvisioningService.js'
+    )
+    const { FakeSipTrunkProvider } = await import('./providers/sip/fake.js')
+    const { UsageService } = await import('./services/usageService.js')
+
+    const { tenantLimitsRepository } = await import(
+      './repositories/tenantLimitsRepository.js'
+    )
+    const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+    tenantLimitsRepository.update(tenantId, { maxDids: 10 })
+    const service = new DidProvisioningService(
+      new FakeSipTrunkProvider(['+15550107000'])
+    )
+    await service.provision(tenantId, { number: '+15550107000' })
+
+    const usage = new UsageService()
+    const before = usage.totalBilledCents(tenantId)
+    usage.sweepDidRentals()
+    const afterOne = usage.totalBilledCents(tenantId)
+    usage.sweepDidRentals() // idempotent — same month, no double charge
+    const afterTwo = usage.totalBilledCents(tenantId)
+
+    assert.ok(afterOne > before, 'rental should be charged once')
+    assert.equal(afterOne, afterTwo, 'second sweep must not double-charge')
+
+    // Next month charges again.
+    usage.sweepDidRentals(new Date(Date.now() + 32 * 24 * 60 * 60 * 1000))
+    assert.ok(usage.totalBilledCents(tenantId) > afterTwo)
+  })
+
   await runTest('stripe wallet credits on webhook and draws down on usage', async () => {
     const { ensurePrimaryTenant } = await getModules()
     const { BillingService } = await import('./services/billingService.js')

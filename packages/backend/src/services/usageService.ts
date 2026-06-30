@@ -1,5 +1,6 @@
 import { UsageSummary, UsageType } from '../../../shared/src/index.js'
 import { config } from '../config.js'
+import { billingRepository } from '../repositories/billingRepository.js'
 import { didRepository } from '../repositories/didRepository.js'
 import { tenantLimitsRepository } from '../repositories/tenantLimitsRepository.js'
 import { usageRepository } from '../repositories/usageRepository.js'
@@ -69,6 +70,22 @@ export class UsageService {
     this.record(tenantId, 'tts', 1, config.usageCosts.ttsCents)
   }
 
+  /**
+   * Charge the monthly rental for every active DID, once per number per month.
+   * Idempotent via the billing_events ledger, so it is safe to run on every
+   * boot and on a daily timer.
+   */
+  sweepDidRentals(date = new Date()): void {
+    const month = monthPrefix(date)
+    for (const did of didRepository.listActive()) {
+      const tenantId = didRepository.tenantIdOf(did.number)
+      if (!tenantId) continue
+      const key = `didrental:${did.number}:${month}`
+      if (!billingRepository.markEventProcessed(key)) continue
+      this.record(tenantId, 'did_rental', 1, did.monthlyCents, did.number)
+    }
+  }
+
   /** Minutes used this month — for the included-minutes limit. */
   minutesThisMonth(tenantId: string): number {
     return usageRepository.minutesForMonth(tenantId, monthPrefix())
@@ -79,26 +96,16 @@ export class UsageService {
     return usageRepository.totalBilledCents(tenantId)
   }
 
-  /** Transparent usage breakdown for a tenant this month, incl. DID rental. */
+  /**
+   * Transparent usage breakdown for a tenant this month. DID rental is included
+   * via {@link sweepDidRentals}, which is run before reads so the current
+   * month's rental is always reflected.
+   */
   summary(tenantId: string): UsageSummary {
+    this.sweepDidRentals()
     const month = monthPrefix()
     const lines = usageRepository.linesForMonth(tenantId, month)
     const limits = tenantLimitsRepository.get(tenantId)
-
-    // DID rental is a recurring monthly charge derived from active DIDs rather
-    // than a per-event row, so it always reflects current holdings.
-    const activeDids = didRepository
-      .listByTenant(tenantId)
-      .filter(did => did.status === 'active')
-    if (activeDids.length > 0) {
-      const carrierCents = activeDids.reduce((sum, d) => sum + d.monthlyCents, 0)
-      lines.push({
-        type: 'did_rental',
-        quantity: activeDids.length,
-        carrierCents,
-        billedCents: Math.round(carrierCents * (limits.markupBps / 10000)),
-      })
-    }
 
     const totalCarrierCents = lines.reduce((s, l) => s + l.carrierCents, 0)
     const totalBilledCents = lines.reduce((s, l) => s + l.billedCents, 0)
