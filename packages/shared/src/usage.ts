@@ -45,6 +45,11 @@ export const UpdateTenantLimitsRequestSchema = z
     message: 'At least one field is required.',
   })
 
+export const GetUsageResponseSchema = z.object({ summary: UsageSummarySchema })
+export const TenantLimitsResponseSchema = z.object({
+  limits: TenantLimitsSchema,
+})
+
 export type UsageType = z.infer<typeof UsageTypeSchema>
 export type UsageLine = z.infer<typeof UsageLineSchema>
 export type TenantLimits = z.infer<typeof TenantLimitsSchema>
@@ -52,3 +57,5 @@ export type UsageSummary = z.infer<typeof UsageSummarySchema>
 export type UpdateTenantLimitsRequest = z.infer<
   typeof UpdateTenantLimitsRequestSchema
 >
+export type GetUsageResponse = z.infer<typeof GetUsageResponseSchema>
+export type TenantLimitsResponse = z.infer<typeof TenantLimitsResponseSchema>

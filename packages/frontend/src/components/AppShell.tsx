@@ -13,6 +13,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, authRequired, logout } = useAuth()
   const isAdmin =
     !authRequired || user?.role === 'admin' || user?.role === 'owner'
+  const isOwner = !authRequired || user?.role === 'owner'
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -36,6 +37,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {isAdmin && (
               <Button color="inherit" component={NavLink} to="/access">
                 Access
+              </Button>
+            )}
+            <Button color="inherit" component={NavLink} to="/billing">
+              Billing
+            </Button>
+            {isOwner && (
+              <Button color="inherit" component={NavLink} to="/tenants">
+                Tenants
               </Button>
             )}
             {authRequired && user && (
