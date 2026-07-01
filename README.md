@@ -2,7 +2,7 @@
 
 ComFlow is a **voicemail regulator**: it receives voicemails over SIP, processes
 them (transcribe → extract → summarize), gives a team a golden inbox to review
-them, and syncs the ones worth acting on into [AnchorDesk](../anchordesk) as
+them, and syncs the ones worth acting on into [AnchorDesk](https://github.com/spilloid/AnchorDesk) as
 tickets.
 
 It is deliberately **not** an AI receptionist. For full conversational
