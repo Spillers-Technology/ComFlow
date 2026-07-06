@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ComFlow — SIP voicemail, transcribed and triaged</title>
   <meta name="description" content="ComFlow receives voicemails over SIP, transcribes and structures them, and gives your team a golden review inbox. Bring your own trunk and self-host, or get a hosted account with a DID to forward your calls to. Scheduled outbound calling included." />
+  <meta property="og:title" content="ComFlow — SIP voicemail, transcribed and triaged" />
+  <meta property="og:description" content="Voicemail regulator with current app screenshots: golden review inbox, call detail with transcript and AnchorDesk sync, scheduled outbound, DID provisioning, prepaid billing, and the owner tenants dashboard." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="https://spillers-technology.github.io/ComFlow/assets/screenshots/comflow-inbox.jpg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -693,6 +697,56 @@
       font-size: 1.4rem;
     }
 
+    /* ── Screenshots ────────────────────────────────────────── */
+    .shots-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .shot-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color 0.25s, box-shadow 0.25s, transform 0.2s;
+    }
+
+    .shot-card:hover {
+      border-color: var(--border-glow);
+      box-shadow: 0 0 30px rgba(124, 58, 237, 0.15);
+      transform: translateY(-2px);
+    }
+
+    .shot-card.wide { grid-column: 1 / -1; }
+
+    .shot-card img {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .shot-caption {
+      padding: 16px 20px 18px;
+    }
+
+    .shot-caption h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .shot-caption p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      line-height: 1.55;
+    }
+
+    @media (max-width: 900px) {
+      .shots-grid { grid-template-columns: 1fr; }
+    }
+
     /* ── Roadmap ────────────────────────────────────────────── */
     .roadmap-grid {
       display: grid;
@@ -981,6 +1035,7 @@
     <div class="nav-links">
       <a href="#features">Features</a>
       <a href="#how-it-works">How It Works</a>
+      <a href="#screenshots">Screenshots</a>
       <a href="#roadmap">Roadmap</a>
       <a href="#access">Get Access</a>
       <a href="https://github.com/Spillers-Technology/ComFlow" target="_blank" rel="noopener">GitHub ↗</a>
@@ -1226,6 +1281,60 @@
   </div>
 </section>
 
+<!-- ── Screenshots ──────────────────────────────────────────── -->
+<section class="section" id="screenshots" style="padding-top: 0;">
+  <div class="container">
+    <div class="section-label">Product</div>
+    <h2 class="section-title">The app, <span class="glow-text">as it ships today</span></h2>
+    <p class="section-sub">Captured from the current web client with mocked API data, so this page carries real screenshots without needing a live backend. Regenerate any time with <code style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 0.85rem;">docs/scripts/capture-product-media.mjs</code>.</p>
+
+    <div class="shots-grid">
+      <figure class="shot-card wide">
+        <img src="assets/screenshots/comflow-inbox.jpg" alt="ComFlow golden review inbox: voicemail rows with caller, callback number, intent, urgency and status badges, queue, AI summary, plus status/intent filters and search." loading="lazy" />
+        <figcaption class="shot-caption">
+          <h3>Golden review inbox</h3>
+          <p>Every voicemail transcribed, extracted, and triaged in one table — new calls emphasized, filters and search on top, urgency and status at a glance.</p>
+        </figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="assets/screenshots/comflow-call-detail.jpg" alt="ComFlow call detail: recording player with download, full transcript, team notes, and an editable review-metadata form with intent, urgency, and status." loading="lazy" />
+        <figcaption class="shot-caption">
+          <h3>Call detail</h3>
+          <p>Playback and download the recording, read the transcript, add notes, and correct the extracted metadata before blessing it into AnchorDesk.</p>
+        </figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="assets/screenshots/comflow-scheduled.jpg" alt="ComFlow scheduled calls: a queued follow-up call, a completed call with the captured spoken answer and its recording, and a no-answer attempt." loading="lazy" />
+        <figcaption class="shot-caption">
+          <h3>Scheduled outbound</h3>
+          <p>Play a message, ask one question, capture the answer — statuses, transcripts, and answer recordings roll in as the scheduler runs.</p>
+        </figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="assets/screenshots/comflow-dids-mailboxes.jpg" alt="ComFlow settings: DID manager with provisioned VoIP.ms numbers, monthly and per-minute pricing, a number search, and mailbox routing configuration." loading="lazy" />
+        <figcaption class="shot-caption">
+          <h3>DIDs &amp; mailboxes</h3>
+          <p>Search and provision numbers from the trunk provider, bind them to mailboxes, and route inbound calls by dialed DID.</p>
+        </figcaption>
+      </figure>
+      <figure class="shot-card">
+        <img src="assets/screenshots/comflow-billing.jpg" alt="ComFlow billing and usage: prepaid wallet balance with top-up, and a monthly usage table showing carrier cost versus charged for minutes, DID rental, and AI." loading="lazy" />
+        <figcaption class="shot-caption">
+          <h3>Billing &amp; usage</h3>
+          <p>A Stripe prepaid wallet that metered usage draws down, with transparent carrier-vs-charged pricing per line item.</p>
+        </figcaption>
+      </figure>
+      <figure class="shot-card wide">
+        <img src="assets/screenshots/comflow-tenants.jpg" alt="ComFlow owner tenants dashboard: onboard a tenant with plan limits and an org-admin, and a tenant table with plan, status, limits, and suspend/activate actions." loading="lazy" />
+        <figcaption class="shot-caption">
+          <h3>Owner dashboard — Tenants</h3>
+          <p>Onboard customer organizations, set plan limits and markup, and suspend or activate tenants — the platform owner's graphical console.</p>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
 <!-- ── Roadmap ──────────────────────────────────────────────── -->
 <section class="section" id="roadmap">
   <div class="container">
@@ -1233,7 +1342,7 @@
       <div class="roadmap-label-block">
         <div class="section-label">Roadmap</div>
         <div class="roadmap-big"><span class="glow-text">Where we're</span><br>going.</div>
-        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">The whole voicemail loop is live today, and 3.0 turns it into a hosted, multi-tenant platform — DIDs, metering, and a prepaid wallet included. What's left is automating the front door: self-serve signup and an owner dashboard, without ever drifting out of ComFlow's lane.</p>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">The whole voicemail loop is live today, and 3.0 turns it into a hosted, multi-tenant platform — DIDs, metering, a prepaid wallet, and an owner dashboard included. What's left is automating the front door: self-serve signup, without ever drifting out of ComFlow's lane.</p>
       </div>
 
       <ul class="roadmap-list">
@@ -1368,10 +1477,10 @@
         <li class="roadmap-item">
           <span class="roadmap-icon">📊</span>
           <div class="roadmap-text">
-            Owner dashboard
-            <small>Graphical tenant, plan, and usage management — fully API-operable today</small>
+            Owner dashboard <small>3.0</small>
+            <small>Owner-only Tenants page: onboard orgs, set plan limits, suspend/activate — plus scripts for the same over the REST API</small>
           </div>
-          <span class="status-badge status-planned">Planned</span>
+          <span class="status-badge status-done">Done</span>
         </li>
       </ul>
     </div>

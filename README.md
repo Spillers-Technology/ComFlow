@@ -35,6 +35,17 @@ SIP source ──SIP/RTP──▶ baresip (SIP edge) ──ctrl_tcp──▶ Com
 - **Integrate** — reviewing/assigning a voicemail pushes it to AnchorDesk as a
   ticket (transcript → description, urgency → priority, recording → attachment).
 
+## What it looks like
+
+![ComFlow inbox — voicemails transcribed, extracted, and triaged](docs/assets/screenshots/comflow-inbox.jpg)
+
+More screenshots (call detail, scheduled outbound, DID provisioning, billing,
+tenants) are on the [project page](https://spillers-technology.github.io/ComFlow/)
+and in [docs/assets/screenshots/](docs/assets/screenshots/). They are captured
+from the real web client with mocked API data — regenerate them with
+`node docs/scripts/capture-product-media.mjs` while `npm run dev:frontend` is
+running (see the header of that script for Playwright setup).
+
 ## Features
 
 - **SIP voicemail capture** via baresip (or `fake` webhooks for dev).
@@ -233,8 +244,10 @@ Two end-to-end playbooks, with copy-paste scripts:
 - [Onboard a paid forward-to user](docs/runbooks/onboard-paid-forward-to-user.md)
   — a single user on a monthly plan with one DID and a Stripe wallet.
 
-The platform is fully operable over the REST API today (see `scripts/`); a
-graphical owner dashboard is on the roadmap.
+Operate the platform from the owner-only **Tenants** page in the UI (onboard
+orgs, set plan limits and markup, suspend/activate) or over the REST API (see
+`scripts/`). Self-serve signup is on the roadmap; today tenants are provisioned
+by the operator.
 
 ## Short version
 
