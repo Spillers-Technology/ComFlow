@@ -1,19 +1,51 @@
 # ComFlow
 
-ComFlow is a **voicemail regulator**: it receives voicemails over SIP, processes
-them (transcribe → extract → summarize), gives a team a golden inbox to review
-them, and syncs the ones worth acting on into [AnchorDesk](https://github.com/spilloid/AnchorDesk) as
-tickets.
+**Turn missed calls into finished work.** ComFlow answers your voicemail line
+over SIP, transcribes and structures every message with AI, gives your team one
+golden inbox to triage, and pushes the calls worth acting on into
+[AnchorDesk](https://github.com/spilloid/AnchorDesk) as tickets.
 
-It is deliberately **not** an AI receptionist. For full conversational
-call-handling, use [agentvoiceresponse](https://github.com/agentvoiceresponse).
-ComFlow stays in its lane: receive, process, present, integrate.
+[![Release](https://img.shields.io/github/v/release/Spillers-Technology/ComFlow)](https://github.com/Spillers-Technology/ComFlow/releases/latest)
+[![Container image](https://img.shields.io/badge/ghcr.io-spillers--technology%2Fcomflow-blue?logo=docker)](https://github.com/Spillers-Technology/ComFlow/pkgs/container/comflow)
+[![CI](https://github.com/Spillers-Technology/ComFlow/actions/workflows/nodejs-ci.yml/badge.svg)](https://github.com/Spillers-Technology/ComFlow/actions/workflows/nodejs-ci.yml)
 
-Run it two ways: **bring your own SIP trunk and self-host** it for a single team
-(open or local-auth, nothing else required), or — new in **3.0** — **run it as a
-multi-tenant service** for others: provision DIDs on demand, meter usage, and bill
+![ComFlow inbox — voicemails transcribed, extracted, and triaged](docs/assets/screenshots/comflow-inbox.jpg)
+
+Every voicemail arrives already worked: **who called, from what company, what
+they want, how urgent it is, and the number to call back** — with the full
+transcript and recording one click away. Nothing gets lost on a handset, and
+nobody types up messages by hand.
+
+ComFlow is a **voicemail regulator**, deliberately **not** an AI receptionist.
+It never fakes a conversation with your callers — it receives, processes,
+presents, and integrates, and stays in that lane. (For full conversational
+call-handling, use [agentvoiceresponse](https://github.com/agentvoiceresponse).)
+
+Run it two ways: **bring your own SIP trunk and self-host** for a single team
+(open or local-auth, nothing else required), or **run it as a multi-tenant
+service** for others — provision phone numbers on demand, meter usage, and bill
 each customer from a Stripe prepaid wallet behind a hard tenant boundary. See
 [Hosting it for others](#hosting-it-for-others-saas).
+
+More screenshots (call detail, scheduled outbound, DID provisioning, billing,
+tenants) are on the [project page](https://spillers-technology.github.io/ComFlow/).
+
+## Get it
+
+Every release ships as a single container image on GitHub Container Registry —
+the Express API and the built React UI, served together on port 3001:
+
+```bash
+docker pull ghcr.io/spillers-technology/comflow:latest
+docker run -d --name comflow -p 3001:3001 -v comflow-data:/data \
+  ghcr.io/spillers-technology/comflow:latest
+```
+
+Open <http://localhost:3001>. Persistent state (SQLite + recordings) lives in
+the `/data` volume. Releases are tagged `X.Y.Z` / `X.Y`; `latest` tracks `main`.
+Configure providers (STT/LLM keys, SIP, auth) via env vars — see
+[Configuration](#configuration). Out of the box it runs with `fake` telephony
+and AI providers, so you can click around before wiring anything up.
 
 ## How it works
 
@@ -35,18 +67,9 @@ SIP source ──SIP/RTP──▶ baresip (SIP edge) ──ctrl_tcp──▶ Com
 - **Integrate** — reviewing/assigning a voicemail pushes it to AnchorDesk as a
   ticket (transcript → description, urgency → priority, recording → attachment).
 
-## What it looks like
-
-![ComFlow inbox — voicemails transcribed, extracted, and triaged](docs/assets/screenshots/comflow-inbox.jpg)
-
-More screenshots (call detail, scheduled outbound, DID provisioning, billing,
-tenants) are on the [project page](https://spillers-technology.github.io/ComFlow/)
-and in [docs/assets/screenshots/](docs/assets/screenshots/). They are captured
-from the real web client with mocked API data — regenerate them with
-`node docs/scripts/capture-product-media.mjs` while `npm run dev:frontend` is
-running (see the header of that script for Playwright setup).
-
 ## Features
+
+**Capture & triage**
 
 - **SIP voicemail capture** via baresip (or `fake` webhooks for dev).
 - **Pluggable STT/LLM** providers: `fake`, OpenAI, Anthropic, ElevenLabs.
@@ -58,6 +81,9 @@ running (see the header of that script for Playwright setup).
   spoken answer. No conversation, no answering-machine detection.
 - **Bring-your-own audio**: upload pre-recorded greetings (inbound) and
   message/question audio (outbound) instead of using TTS.
+
+**Teams & access**
+
 - **Accounts, SSO & teams**: first-class local auth (open by default) plus
   OIDC/SAML SSO; admins manage users, multiple mailboxes/DIDs, and groups that
   grant per-mailbox visibility — all under Settings and Access.
@@ -66,9 +92,12 @@ running (see the header of that script for Playwright setup).
 - **Hosted MCP endpoint**: `/api/mcp` exposes ComFlow tools and recording
   resources over MCP Streamable HTTP, authenticated by the same `cf_` keys and
   scoped to the key owner's role and mailbox grants.
-- **Multi-tenant (hosted mode)**: a hard `tenant_id` boundary isolates every
-  customer's users, mailboxes, DIDs, and voicemails. A platform `owner` manages
-  tenants and plans; each tenant has its own `admin`.
+
+**Hosted mode (SaaS)**
+
+- **Multi-tenant**: a hard `tenant_id` boundary isolates every customer's
+  users, mailboxes, DIDs, and voicemails. A platform `owner` manages tenants
+  and plans; each tenant has its own `admin`.
 - **On-the-fly DID provisioning**: order numbers from a SIP trunk provider
   (VoIP.ms) over its API and bind them to a tenant's mailbox — forward your line
   to the DID and it answers. A `fake` provider backs dev/tests.
@@ -77,22 +106,7 @@ running (see the header of that script for Playwright setup).
   prepaid wallet that usage draws down. Per-tenant limits and trunk concurrency
   caps included.
 
-## Repo layout
-
-```text
-.
-├─ packages/
-│  ├─ shared/    # domain models + Zod schemas
-│  ├─ backend/   # Express API, SQLite, providers (SIP trunk, billing), gateway
-│  ├─ frontend/  # Vite + React + MUI operator UI
-│  └─ mcp/       # hosted MCP endpoint (tools + recording resources)
-├─ infra/baresip/  # SIP edge: Dockerfile, config, accounts (BYO credentials)
-├─ scripts/        # operator scripts (provision tenants/DIDs, usage) — see runbooks
-├─ docs/runbooks/  # end-to-end onboarding playbooks
-└─ docker-compose.yml
-```
-
-## Running it
+## Running from source
 
 ```bash
 npm install
@@ -145,6 +159,11 @@ Build + verify:
 npm run build
 npm test --workspace @comflow/backend
 ```
+
+Screenshots are captured from the real web client with mocked API data —
+regenerate them with `node docs/scripts/capture-product-media.mjs` while
+`npm run dev:frontend` is running (see the header of that script for
+Playwright setup).
 
 ## API surface
 
@@ -248,6 +267,21 @@ Operate the platform from the owner-only **Tenants** page in the UI (onboard
 orgs, set plan limits and markup, suspend/activate) or over the REST API (see
 `scripts/`). Self-serve signup is on the roadmap; today tenants are provisioned
 by the operator.
+
+## Repo layout
+
+```text
+.
+├─ packages/
+│  ├─ shared/    # domain models + Zod schemas
+│  ├─ backend/   # Express API, SQLite, providers (SIP trunk, billing), gateway
+│  ├─ frontend/  # Vite + React + MUI operator UI
+│  └─ mcp/       # hosted MCP endpoint (tools + recording resources)
+├─ infra/baresip/  # SIP edge: Dockerfile, config, accounts (BYO credentials)
+├─ scripts/        # operator scripts (provision tenants/DIDs, usage) — see runbooks
+├─ docs/runbooks/  # end-to-end onboarding playbooks
+└─ docker-compose.yml
+```
 
 ## Short version
 
