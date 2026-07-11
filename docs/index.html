@@ -998,7 +998,8 @@
 
       .section { padding: 64px 0; }
     }
-  </style>
+</style>
+<link rel="stylesheet" href="assets/lightbox.css" />
 <!-- OpenReplay Tracking Code (replay.spillerstech.us) -->
 <script>
   var initOpts = {
@@ -1292,42 +1293,54 @@
 
     <div class="shots-grid">
       <figure class="shot-card wide">
-        <img src="assets/screenshots/comflow-inbox.jpg" alt="ComFlow golden review inbox: voicemail rows with caller, callback number, intent, urgency and status badges, queue, AI summary, plus status/intent filters and search." loading="lazy" />
+        <button class="lightbox-trigger" type="button" data-lightbox>
+          <img src="assets/screenshots/comflow-inbox.jpg" alt="ComFlow golden review inbox: voicemail rows with caller, callback number, intent, urgency and status badges, queue, AI summary, plus status/intent filters and search." loading="lazy" />
+        </button>
         <figcaption class="shot-caption">
           <h3>Golden review inbox</h3>
           <p>Every voicemail transcribed, extracted, and triaged in one table — new calls emphasized, filters and search on top, urgency and status at a glance.</p>
         </figcaption>
       </figure>
       <figure class="shot-card">
-        <img src="assets/screenshots/comflow-call-detail.jpg" alt="ComFlow call detail: recording player with download, full transcript, team notes, and an editable review-metadata form with intent, urgency, and status." loading="lazy" />
+        <button class="lightbox-trigger" type="button" data-lightbox>
+          <img src="assets/screenshots/comflow-call-detail.jpg" alt="ComFlow call detail: recording player with download, full transcript, team notes, and an editable review-metadata form with intent, urgency, and status." loading="lazy" />
+        </button>
         <figcaption class="shot-caption">
           <h3>Call detail</h3>
           <p>Playback and download the recording, read the transcript, add notes, and correct the extracted metadata before blessing it into AnchorDesk.</p>
         </figcaption>
       </figure>
       <figure class="shot-card">
-        <img src="assets/screenshots/comflow-scheduled.jpg" alt="ComFlow scheduled calls: a queued follow-up call, a completed call with the captured spoken answer and its recording, and a no-answer attempt." loading="lazy" />
+        <button class="lightbox-trigger" type="button" data-lightbox>
+          <img src="assets/screenshots/comflow-scheduled.jpg" alt="ComFlow scheduled calls: a queued follow-up call, a completed call with the captured spoken answer and its recording, and a no-answer attempt." loading="lazy" />
+        </button>
         <figcaption class="shot-caption">
           <h3>Scheduled outbound</h3>
           <p>Play a message, ask one question, capture the answer — statuses, transcripts, and answer recordings roll in as the scheduler runs.</p>
         </figcaption>
       </figure>
       <figure class="shot-card">
-        <img src="assets/screenshots/comflow-dids-mailboxes.jpg" alt="ComFlow settings: DID manager with provisioned VoIP.ms numbers, monthly and per-minute pricing, a number search, and mailbox routing configuration." loading="lazy" />
+        <button class="lightbox-trigger" type="button" data-lightbox>
+          <img src="assets/screenshots/comflow-dids-mailboxes.jpg" alt="ComFlow settings: DID manager with provisioned VoIP.ms numbers, monthly and per-minute pricing, a number search, and mailbox routing configuration." loading="lazy" />
+        </button>
         <figcaption class="shot-caption">
           <h3>DIDs &amp; mailboxes</h3>
           <p>Search and provision numbers from the trunk provider, bind them to mailboxes, and route inbound calls by dialed DID.</p>
         </figcaption>
       </figure>
       <figure class="shot-card">
-        <img src="assets/screenshots/comflow-billing.jpg" alt="ComFlow billing and usage: prepaid wallet balance with top-up, and a monthly usage table showing carrier cost versus charged for minutes, DID rental, and AI." loading="lazy" />
+        <button class="lightbox-trigger" type="button" data-lightbox>
+          <img src="assets/screenshots/comflow-billing.jpg" alt="ComFlow billing and usage: prepaid wallet balance with top-up, and a monthly usage table showing carrier cost versus charged for minutes, DID rental, and AI." loading="lazy" />
+        </button>
         <figcaption class="shot-caption">
           <h3>Billing &amp; usage</h3>
           <p>A Stripe prepaid wallet that metered usage draws down, with transparent carrier-vs-charged pricing per line item.</p>
         </figcaption>
       </figure>
       <figure class="shot-card wide">
-        <img src="assets/screenshots/comflow-tenants.jpg" alt="ComFlow owner tenants dashboard: onboard a tenant with plan limits and an org-admin, and a tenant table with plan, status, limits, and suspend/activate actions." loading="lazy" />
+        <button class="lightbox-trigger" type="button" data-lightbox>
+          <img src="assets/screenshots/comflow-tenants.jpg" alt="ComFlow owner tenants dashboard: onboard a tenant with plan limits and an org-admin, and a tenant table with plan, status, limits, and suspend/activate actions." loading="lazy" />
+        </button>
         <figcaption class="shot-caption">
           <h3>Owner dashboard — Tenants</h3>
           <p>Onboard customer organizations, set plan limits and markup, and suspend or activate tenants — the platform owner's graphical console.</p>
@@ -1527,5 +1540,6 @@
   </div>
 </footer>
 
+<script src="assets/lightbox.js"></script>
 </body>
 </html>

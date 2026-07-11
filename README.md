@@ -283,6 +283,12 @@ by the operator.
 └─ docker-compose.yml
 ```
 
+## Contributing
+
+Found a sharp edge or want to add a provider? Issues and focused pull requests
+are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers scope, synthetic caller
+data, local checks, and what makes a useful review.
+
 ## Short version
 
 ComFlow captures missed calls over SIP, turns them into structured, reviewable
