@@ -10,6 +10,7 @@ function toApiUser(record: {
   role: User['role']
   authProvider: string
   tenantId: string
+  emailVerified: boolean
 }): User {
   return {
     id: record.id,
@@ -18,6 +19,7 @@ function toApiUser(record: {
     role: record.role,
     authProvider: record.authProvider,
     tenantId: record.tenantId,
+    emailVerified: record.emailVerified,
   }
 }
 

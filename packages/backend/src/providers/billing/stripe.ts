@@ -74,10 +74,22 @@ export class StripeBillingProvider implements BillingProvider {
     return { url: String(session.url) }
   }
 
-  parseWebhook(input: {
+  private async get(path: string): Promise<Record<string, unknown>> {
+    const response = await fetch(`${STRIPE_API}${path}`, {
+      headers: { Authorization: `Bearer ${this.config.secretKey}` },
+    })
+    const body = (await response.json()) as Record<string, unknown>
+    if (!response.ok) {
+      const error = body.error as { message?: string } | undefined
+      throw new Error(`Stripe ${path} failed: ${error?.message ?? response.status}`)
+    }
+    return body
+  }
+
+  async parseWebhook(input: {
     rawBody: Buffer | string
     signature: string | undefined
-  }): PaymentEvent | null {
+  }): Promise<PaymentEvent | null> {
     const raw =
       typeof input.rawBody === 'string' ? input.rawBody : input.rawBody.toString()
     this.verifySignature(raw, input.signature)
@@ -87,23 +99,55 @@ export class StripeBillingProvider implements BillingProvider {
       type: string
       data: { object: Record<string, unknown> }
     }
-    if (event.type !== 'checkout.session.completed') return null
 
-    const object = event.data.object
-    const metadata = (object.metadata ?? {}) as { tenantId?: string }
-    const amountCents = Number(object.amount_total ?? 0)
-    if (!metadata.tenantId || !amountCents) return null
+    if (event.type === 'checkout.session.completed') {
+      const object = event.data.object
+      const metadata = (object.metadata ?? {}) as { tenantId?: string }
+      const amountCents = Number(object.amount_total ?? 0)
+      // Only settled funds credit the wallet: async payment methods complete
+      // the session with payment_status 'unpaid' and settle (or fail) later.
+      if (object.payment_status !== 'paid') return null
+      if (!metadata.tenantId || !amountCents) return null
 
-    return {
-      id: event.id,
-      type: 'payment_succeeded',
-      tenantId: metadata.tenantId,
-      amountCents,
+      return {
+        id: event.id,
+        type: 'payment_succeeded',
+        tenantId: metadata.tenantId,
+        amountCents,
+      }
     }
+
+    if (event.type === 'charge.dispute.created') {
+      const dispute = event.data.object as {
+        charge?: string
+        amount?: number
+      }
+      if (!dispute.charge) return null
+      // The dispute payload has no customer/metadata; fetch its charge to
+      // learn which customer (and therefore tenant) is disputing.
+      const charge = await this.get(`/charges/${dispute.charge}`)
+      const customerId = charge.customer ? String(charge.customer) : undefined
+      if (!customerId) return null
+
+      return {
+        id: event.id,
+        type: 'payment_disputed',
+        customerId,
+        amountCents: Number(dispute.amount ?? 0),
+      }
+    }
+
+    return null
   }
 
   private verifySignature(payload: string, header: string | undefined): void {
-    if (!this.config.webhookSecret) return // verification disabled
+    if (!this.config.webhookSecret) {
+      // Refuse to guess: without the signing secret, any caller could forge
+      // wallet credits. Hosted mode must set STRIPE_WEBHOOK_SECRET.
+      throw new Error(
+        'STRIPE_WEBHOOK_SECRET is not set; refusing to accept unverified webhooks.'
+      )
+    }
     if (!header) throw new Error('Missing Stripe-Signature header.')
 
     const parts = Object.fromEntries(

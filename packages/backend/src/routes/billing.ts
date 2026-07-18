@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { TopUpRequestSchema, User } from '../../../shared/src/index.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'
+import { requireVerifiedEmail } from '../middleware/requireVerifiedEmail.js'
 import { BillingService } from '../services/billingService.js'
 
 export function createBillingRouter(billingService: BillingService) {
@@ -20,6 +21,7 @@ export function createBillingRouter(billingService: BillingService) {
   router.post(
     '/topup',
     requireAdmin,
+    requireVerifiedEmail,
     asyncHandler(async (request, response) => {
       const user = response.locals.user as User
       const input = parseBody(TopUpRequestSchema, request.body)

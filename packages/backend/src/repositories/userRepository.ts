@@ -11,6 +11,8 @@ type UserRow = {
   auth_provider: string
   external_id: string | null
   tenant_id: string
+  email_verified_at: string | null
+  email_verification_token: string | null
   created_at: string
   updated_at: string
 }
@@ -18,6 +20,7 @@ type UserRow = {
 export type UserRecord = User & {
   passwordHash: string | null
   externalId: string | null
+  emailVerifiedAt: string | null
 }
 
 function mapRow(row: UserRow): UserRecord {
@@ -28,8 +31,14 @@ function mapRow(row: UserRow): UserRecord {
     role: row.role,
     authProvider: row.auth_provider,
     tenantId: row.tenant_id,
+    emailVerified: Boolean(row.email_verified_at),
   })
-  return { ...api, passwordHash: row.password_hash, externalId: row.external_id }
+  return {
+    ...api,
+    passwordHash: row.password_hash,
+    externalId: row.external_id,
+    emailVerifiedAt: row.email_verified_at,
+  }
 }
 
 export const userRepository = {
@@ -71,8 +80,13 @@ export const userRepository = {
     tenantId: string
     authProvider?: string
     externalId?: string | null
+    // Defaults verified: operator-created, SSO, and bootstrap accounts don't
+    // do the verification dance — only self-registration passes false.
+    emailVerified?: boolean
+    verificationToken?: string | null
   }): UserRecord {
     const now = new Date().toISOString()
+    const verified = input.emailVerified ?? true
     const row: UserRow = {
       id: randomUUID(),
       email: input.email,
@@ -82,16 +96,36 @@ export const userRepository = {
       auth_provider: input.authProvider ?? 'local',
       external_id: input.externalId ?? null,
       tenant_id: input.tenantId,
+      email_verified_at: verified ? now : null,
+      email_verification_token: verified ? null : input.verificationToken ?? null,
       created_at: now,
       updated_at: now,
     }
     db.prepare(`
       INSERT INTO users (
-        id, email, display_name, password_hash, role, auth_provider, external_id, tenant_id, created_at, updated_at
+        id, email, display_name, password_hash, role, auth_provider, external_id, tenant_id,
+        email_verified_at, email_verification_token, created_at, updated_at
       )
-      VALUES (@id, @email, @display_name, @password_hash, @role, @auth_provider, @external_id, @tenant_id, @created_at, @updated_at)
+      VALUES (@id, @email, @display_name, @password_hash, @role, @auth_provider, @external_id, @tenant_id,
+        @email_verified_at, @email_verification_token, @created_at, @updated_at)
     `).run(row)
     return mapRow(row)
+  },
+
+  getByVerificationToken(token: string): UserRecord | null {
+    const row = db
+      .prepare('SELECT * FROM users WHERE email_verification_token = ?')
+      .get(token) as UserRow | undefined
+    return row ? mapRow(row) : null
+  },
+
+  markEmailVerified(id: string): void {
+    const now = new Date().toISOString()
+    db.prepare(`
+      UPDATE users
+      SET email_verified_at = ?, email_verification_token = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(now, now, id)
   },
 
   setRole(id: string, role: UserRole): void {

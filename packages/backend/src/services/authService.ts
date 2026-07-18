@@ -16,6 +16,7 @@ export function toApiUser(record: UserRecord): User {
     role: record.role,
     authProvider: record.authProvider,
     tenantId: record.tenantId,
+    emailVerified: record.emailVerified,
   }
 }
 

@@ -38,6 +38,7 @@ import { UsageService } from './services/usageService.js'
 import { EmailNotificationService } from './services/emailNotificationService.js'
 import { EngineService } from './services/engineService.js'
 import { MailboxService } from './services/mailboxService.js'
+import { RegistrationService } from './services/registrationService.js'
 import { ScheduledCallService } from './services/scheduledCallService.js'
 import { SsoService } from './services/ssoService.js'
 import { TelephonyGatewayService } from './services/telephonyGatewayService.js'
@@ -60,6 +61,7 @@ export function createApp() {
   const callReviewService = new CallReviewService()
   const authService = new AuthService()
   const ssoService = new SsoService()
+  const registrationService = new RegistrationService(emailNotificationService)
   const mailboxService = new MailboxService()
   // Ensure the primary tenant exists and back-fill pre-tenancy rows onto it,
   // then bootstrap the owner + that tenant's default mailbox.
@@ -355,9 +357,9 @@ export function createApp() {
   app.post(
     '/api/webhooks/stripe',
     express.raw({ type: '*/*' }),
-    (request, response) => {
+    async (request, response) => {
       try {
-        billingService.handleWebhook(
+        await billingService.handleWebhook(
           request.body as Buffer,
           request.headers['stripe-signature'] as string | undefined
         )
@@ -372,7 +374,10 @@ export function createApp() {
 
   // Open endpoints: health, auth, and webhooks (machine-to-machine).
   app.use('/api/health', createHealthRouter(engineService))
-  app.use('/api/auth', createAuthRouter(authService, ssoService))
+  app.use(
+    '/api/auth',
+    createAuthRouter(authService, ssoService, registrationService)
+  )
   app.use(
     '/api/webhooks',
     createWebhookRouter(telephonyProvider, callIngestionService)

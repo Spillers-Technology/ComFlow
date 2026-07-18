@@ -221,6 +221,18 @@ export const config = {
       },
     },
   },
+  // Self-service signup (hosted mode): a public endpoint creates a tenant with
+  // the caller as its org-admin. Off by default; requires COMFLOW_AUTH_REQUIRED
+  // so open-mode self-hosts can't be turned into accidental multi-tenant hosts.
+  selfRegistration: {
+    enabled: process.env.COMFLOW_SELF_REGISTRATION === 'true',
+    plan: readOptionalEnv('COMFLOW_SELF_REGISTRATION_PLAN') ?? 'solo',
+    // Verification links ride the SMTP notification transport; when email
+    // notifications are off there is no way to deliver them, so accounts
+    // auto-verify (dev/dry-run). Set false to skip verification entirely.
+    requireEmailVerification:
+      process.env.COMFLOW_SELF_REGISTRATION_VERIFY !== 'false',
+  },
   // The "primary" tenant every pre-tenancy row backfills onto, and the home of
   // the bootstrap admin + default mailbox. In self-host/open mode this is the
   // only tenant; in hosted mode the platform owner adds more alongside it.

@@ -291,6 +291,33 @@ addColumnIfMissing('calls', 'email_notified_at', 'TEXT')
 addColumnIfMissing('calls', 'reviewed_by', 'TEXT')
 // Links a local user row to an external SSO identity (subject/nameID).
 addColumnIfMissing('users', 'external_id', 'TEXT')
+// Email verification (4.0 self-registration). Operator-created, SSO, and
+// bootstrap accounts are verified at creation; only self-registered accounts
+// start unverified, holding a token until the emailed link is clicked.
+addColumnIfMissing('users', 'email_verified_at', 'TEXT')
+addColumnIfMissing('users', 'email_verification_token', 'TEXT')
+// Backfill pre-4.0 rows as verified. Unverified self-registered rows always
+// carry a token, so the token guard keeps them out of this backfill.
+db.prepare(`
+  UPDATE users SET email_verified_at = updated_at
+  WHERE email_verified_at IS NULL AND email_verification_token IS NULL
+`).run()
+
+// Audit trail (4.0): privileged/automated actions — self-registration, DID
+// provision/release, wallet credits, tenant freeze/unfreeze — leave a row here
+// so hosted-mode changes are attributable after the fact.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    tenant_id TEXT,
+    detail TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_tenant_created
+    ON audit_log(tenant_id, created_at DESC);
+`)
 
 // Multi-tenancy (3.0): every customer-owned table gets a tenant_id. Added as a
 // nullable column first so existing databases migrate cleanly, then backfilled

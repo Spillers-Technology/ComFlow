@@ -22,6 +22,7 @@ function openModeUser(): User {
     role: 'owner',
     authProvider: 'open',
     tenantId: primary.id,
+    emailVerified: true,
   }
 }
 

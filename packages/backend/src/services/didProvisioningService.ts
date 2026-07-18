@@ -4,6 +4,8 @@ import {
   ProvisionedDid,
 } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
+import { assertTenantActive } from '../lib/tenantGuards.js'
+import { auditRepository } from '../repositories/auditRepository.js'
 import { didRepository } from '../repositories/didRepository.js'
 import { mailboxRepository } from '../repositories/mailboxRepository.js'
 import { tenantLimitsRepository } from '../repositories/tenantLimitsRepository.js'
@@ -35,8 +37,11 @@ export class DidProvisioningService {
 
   async provision(
     tenantId: string,
-    input: ProvisionDidRequest
+    input: ProvisionDidRequest,
+    actor = 'system'
   ): Promise<ProvisionedDid> {
+    // Frozen tenants (chargeback/owner action) may not order numbers.
+    assertTenantActive(tenantId)
     if (didRepository.getByNumber(input.number)) {
       throw new HttpError(409, 'That number is already provisioned.')
     }
@@ -59,7 +64,7 @@ export class DidProvisioningService {
     const ordered = await this.provider.orderDid(input.number)
 
     mailboxRepository.update(mailboxId, { number: ordered.number })
-    return didRepository.create({
+    const did = didRepository.create({
       tenantId,
       number: ordered.number,
       provider: this.provider.id,
@@ -67,9 +72,16 @@ export class DidProvisioningService {
       perMinuteCents: ordered.perMinuteCents,
       mailboxId,
     })
+    auditRepository.record({
+      actor,
+      action: 'did.provision',
+      tenantId,
+      detail: { number: did.number, monthlyCents: did.monthlyCents },
+    })
+    return did
   }
 
-  async release(tenantId: string, number: string): Promise<void> {
+  async release(tenantId: string, number: string, actor = 'system'): Promise<void> {
     const did = didRepository.getByNumber(number)
     if (!did || didRepository.tenantIdOf(number) !== tenantId) {
       throw new HttpError(404, 'DID not found.')
@@ -82,6 +94,12 @@ export class DidProvisioningService {
     if (did.mailboxId) {
       mailboxRepository.update(did.mailboxId, { number: null })
     }
+    auditRepository.record({
+      actor,
+      action: 'did.release',
+      tenantId,
+      detail: { number },
+    })
   }
 
   private resolveTargetMailbox(

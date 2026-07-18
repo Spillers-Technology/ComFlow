@@ -43,6 +43,14 @@ export const billingRepository = {
     }
   },
 
+  /** Reverse lookup for provider webhooks that only carry a customer id. */
+  tenantIdByCustomer(customerId: string): string | null {
+    const row = db
+      .prepare('SELECT tenant_id FROM tenant_billing WHERE stripe_customer_id = ?')
+      .get(customerId) as { tenant_id: string } | undefined
+    return row?.tenant_id ?? null
+  },
+
   setCustomer(tenantId: string, customerId: string): void {
     this.get(tenantId)
     db.prepare(

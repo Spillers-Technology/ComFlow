@@ -8,6 +8,7 @@ import { config } from '../config.js'
 import { createSilentWav } from '../lib/audio.js'
 import { HttpError } from '../lib/errors.js'
 import { callRepository } from '../repositories/callRepository.js'
+import { tenantRepository } from '../repositories/tenantRepository.js'
 import { EmailNotificationService } from './emailNotificationService.js'
 import { EngineService } from './engineService.js'
 import { MailboxService } from './mailboxService.js'
@@ -35,6 +36,12 @@ export class CallIngestionService {
       toNumber: input.toNumber,
       accountLabel: input.accountLabel,
     })
+    // Frozen tenants get no inbound service: their calls are refused rather
+    // than accruing STT/LLM/minute costs nobody will pay for.
+    const tenant = tenantRepository.getById(routing.tenantId)
+    if (tenant && tenant.status !== 'active') {
+      throw new HttpError(403, 'Tenant is suspended; inbound service disabled.')
+    }
     const call = callRepository.createInitial({
       telephonyCallId: input.telephonyCallId,
       source: input.source,
