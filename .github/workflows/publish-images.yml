@@ -1,8 +1,8 @@
 name: Publish image to GHCR
 
 # Builds and pushes the single ComFlow image to GitHub Container Registry.
-# - push to main      -> :main and :latest (+ :sha-xxxxxxx)
-# - push a vX.Y.Z tag -> :X.Y.Z, :X.Y, :latest
+# - push to main      -> :main (+ :sha-xxxxxxx) — never :latest
+# - push a vX.Y.Z tag -> :X.Y.Z, :X.Y, :latest (latest tracks releases only)
 # - manual run        -> via the Actions tab (workflow_dispatch)
 
 on:
@@ -48,7 +48,6 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v6

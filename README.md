@@ -42,7 +42,8 @@ docker run -d --name comflow -p 3001:3001 -v comflow-data:/data \
 ```
 
 Open <http://localhost:3001>. Persistent state (SQLite + recordings) lives in
-the `/data` volume. Releases are tagged `X.Y.Z` / `X.Y`; `latest` tracks `main`.
+the `/data` volume. Releases are tagged `X.Y.Z` / `X.Y`; `latest` tracks the
+newest release, while `main` tracks the development branch.
 Configure providers (STT/LLM keys, SIP, auth) via env vars — see
 [Configuration](#configuration). Out of the box it runs with `fake` telephony
 and AI providers, so you can click around before wiring anything up.
