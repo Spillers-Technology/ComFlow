@@ -26,9 +26,52 @@ export const LoginRequestSchema = z.object({
   password: z.string().min(1),
 })
 
-export const LoginResponseSchema = z.object({
+/** A completed sign-in. SSO always lands here; local login may not. */
+export const SessionGrantSchema = z.object({
   token: z.string(),
   user: UserSchema,
+})
+
+export const MfaChallengeSchema = z.object({
+  mfaRequired: z.literal(true),
+  challengeToken: z.string(),
+})
+
+// Either the login completed and carries a session token, or the account has
+// TOTP enabled and the caller must exchange the challenge for a session.
+export const LoginResponseSchema = z.union([
+  SessionGrantSchema,
+  MfaChallengeSchema,
+])
+
+export const CompleteMfaLoginRequestSchema = z.object({
+  challengeToken: z.string().min(1),
+  // A 6-digit TOTP code or a recovery code; the server tries both.
+  code: z.string().trim().min(1).max(64),
+})
+
+export const MfaEnrollResponseSchema = z.object({
+  secret: z.string(),
+  otpauthUri: z.string(),
+})
+
+export const MfaConfirmRequestSchema = z.object({
+  code: z.string().trim().min(6).max(10),
+})
+
+export const MfaConfirmResponseSchema = z.object({
+  // Shown exactly once; only hashes are stored.
+  recoveryCodes: z.array(z.string()),
+})
+
+export const DisableMfaRequestSchema = z.object({
+  password: z.string().min(1),
+})
+
+export const MfaStatusSchema = z.object({
+  enabled: z.boolean(),
+  // Null when MFA is off; otherwise how many single-use codes remain.
+  recoveryCodesRemaining: z.number().nullable(),
 })
 
 // Self-service signup: creates a new tenant with the caller as its org-admin.
@@ -62,6 +105,27 @@ export const ResendVerificationResponseSchema = z.object({
   // Always true, including for unknown/already-verified addresses, so this
   // public endpoint cannot be used to enumerate accounts.
   accepted: z.literal(true),
+})
+
+export const ForgotPasswordRequestSchema = z.object({
+  email: z.string().trim().email(),
+})
+
+export const ForgotPasswordResponseSchema = z.object({
+  // Always true, for the same anti-enumeration reason as resend-verification.
+  accepted: z.literal(true),
+})
+
+// Distinct from users.ts's ResetPasswordRequestSchema, which is an admin
+// setting another user's password directly. This one consumes an emailed token.
+export const CompletePasswordResetRequestSchema = z.object({
+  token: z.string().trim().min(1),
+  // Mirrors the minimum enforced at registration.
+  password: z.string().min(8).max(200),
+})
+
+export const CompletePasswordResetResponseSchema = z.object({
+  ok: z.literal(true),
 })
 
 export const SsoProviderInfoSchema = z.object({
@@ -99,8 +163,25 @@ export type ResendVerificationRequest = z.infer<
 export type ResendVerificationResponse = z.infer<
   typeof ResendVerificationResponseSchema
 >
+export type ForgotPasswordRequest = z.infer<typeof ForgotPasswordRequestSchema>
+export type ForgotPasswordResponse = z.infer<
+  typeof ForgotPasswordResponseSchema
+>
+export type CompletePasswordResetRequest = z.infer<
+  typeof CompletePasswordResetRequestSchema
+>
 export type SsoProviderInfo = z.infer<typeof SsoProviderInfoSchema>
 export type AuthProvidersResponse = z.infer<typeof AuthProvidersResponseSchema>
 export type LoginRequest = z.infer<typeof LoginRequestSchema>
 export type LoginResponse = z.infer<typeof LoginResponseSchema>
+export type SessionGrant = z.infer<typeof SessionGrantSchema>
+export type MfaChallenge = z.infer<typeof MfaChallengeSchema>
+export type CompleteMfaLoginRequest = z.infer<
+  typeof CompleteMfaLoginRequestSchema
+>
+export type MfaEnrollResponse = z.infer<typeof MfaEnrollResponseSchema>
+export type MfaConfirmRequest = z.infer<typeof MfaConfirmRequestSchema>
+export type MfaConfirmResponse = z.infer<typeof MfaConfirmResponseSchema>
+export type DisableMfaRequest = z.infer<typeof DisableMfaRequestSchema>
+export type MfaStatus = z.infer<typeof MfaStatusSchema>
 export type MeResponse = z.infer<typeof MeResponseSchema>

@@ -2,11 +2,9 @@ import { NextFunction, Request, Response } from 'express'
 import { User } from '../../../shared/src/index.js'
 import { config } from '../config.js'
 import { ensurePrimaryTenant } from '../db/client.js'
-import { verifySessionToken } from '../lib/token.js'
 import { tenantRepository } from '../repositories/tenantRepository.js'
-import { userRepository } from '../repositories/userRepository.js'
 import { apiKeyService } from '../services/apiKeyService.js'
-import { toApiUser } from '../services/authService.js'
+import { resolveSessionUser, toApiUser } from '../services/authService.js'
 
 // Synthetic identity used when auth is not enforced (open mode), so handlers can
 // always rely on res.locals.user being present. It is the platform owner of the
@@ -52,8 +50,7 @@ export function requireAuth(
     return
   }
 
-  const userId = token ? verifySessionToken(token) : null
-  const record = userId ? userRepository.getById(userId) : null
+  const record = token ? resolveSessionUser(token) : null
 
   if (!record) {
     response.status(401).json({ error: 'Authentication required.' })

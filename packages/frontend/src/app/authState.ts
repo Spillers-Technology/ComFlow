@@ -14,7 +14,9 @@ export interface AuthState {
   providers: SsoProviderInfo[]
   ssoError: string | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  /** Resolves to an MFA challenge token, or null when sign-in is complete. */
+  login: (email: string, password: string) => Promise<string | null>
+  completeMfaLogin: (challengeToken: string, code: string) => Promise<void>
   register: (input: RegisterRequest) => Promise<RegisterResponse>
   verifyEmail: (token: string) => Promise<User>
   logout: () => void

@@ -298,12 +298,36 @@ addColumnIfMissing('users', 'email_verified_at', 'TEXT')
 addColumnIfMissing('users', 'email_verification_token', 'TEXT')
 addColumnIfMissing('users', 'email_verification_expires_at', 'TEXT')
 addColumnIfMissing('users', 'self_registered_at', 'TEXT')
+// Password reset. Same shape as email verification: a random token stored only
+// as a SHA-256 hash, with an expiry, cleared once consumed.
+addColumnIfMissing('users', 'password_reset_token', 'TEXT')
+addColumnIfMissing('users', 'password_reset_expires_at', 'TEXT')
+// Session tokens are stateless, so revocation works by bumping this counter:
+// a token carrying a stale epoch is rejected. Bumped on password change/reset.
+addColumnIfMissing('users', 'session_epoch', 'INTEGER NOT NULL DEFAULT 0')
+// TOTP MFA for local accounts. The secret is held from enrollment onward, but
+// MFA is only enforced once totp_enabled_at is set (i.e. the user proved they
+// can generate a code). Recovery codes are a JSON array of SHA-256 hashes.
+addColumnIfMissing('users', 'totp_secret', 'TEXT')
+addColumnIfMissing('users', 'totp_enabled_at', 'TEXT')
+addColumnIfMissing('users', 'totp_recovery_codes', 'TEXT')
 addColumnIfMissing(
   'tenant_billing',
   'pending_topup_cents',
   'INTEGER NOT NULL DEFAULT 0'
 )
 addColumnIfMissing('tenant_billing', 'pending_topup_expires_at', 'TEXT')
+// Banded subscriptions. `plan` already holds the band; these track the Stripe
+// subscription behind it and the period that included minutes reset on.
+addColumnIfMissing('tenant_billing', 'stripe_subscription_id', 'TEXT')
+addColumnIfMissing('tenant_billing', 'subscription_status', 'TEXT')
+addColumnIfMissing('tenant_billing', 'current_period_start', 'TEXT')
+addColumnIfMissing('tenant_billing', 'current_period_end', 'TEXT')
+addColumnIfMissing(
+  'tenant_billing',
+  'cancel_at_period_end',
+  'INTEGER NOT NULL DEFAULT 0'
+)
 // Backfill pre-4.0 rows as verified. Unverified self-registered rows always
 // carry a token, so the token guard keeps them out of this backfill.
 db.prepare(`

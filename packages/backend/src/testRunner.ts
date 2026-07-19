@@ -884,6 +884,7 @@ async function main() {
         required: config.auth.required,
         localEnabled: config.auth.localEnabled,
         emailEnabled: config.email.notificationsEnabled,
+        sessionSecret: config.auth.sessionSecret,
       }
       config.selfRegistration.enabled = true
 
@@ -902,6 +903,10 @@ async function main() {
       config.email.notificationsEnabled = false
       assert.throws(() => service.assertConfiguration(), /EMAIL_NOTIFICATIONS/)
       config.email.notificationsEnabled = true
+      const { DEV_SESSION_SECRET } = await import('./config.js')
+      config.auth.sessionSecret = DEV_SESSION_SECRET
+      assert.throws(() => service.assertConfiguration(), /AUTH_SESSION_SECRET/)
+      config.auth.sessionSecret = 'test-session-secret'
       service.assertConfiguration()
       db.exec(`
         CREATE TEMP TRIGGER fail_self_registration_audit
@@ -936,6 +941,7 @@ async function main() {
         config.auth.required = previous.required
         config.auth.localEnabled = previous.localEnabled
         config.email.notificationsEnabled = previous.emailEnabled
+        config.auth.sessionSecret = previous.sessionSecret
       }
     }
   )
@@ -975,12 +981,14 @@ async function main() {
         emailEnabled: config.email.notificationsEnabled,
         emailTo: [...config.email.to],
         defaultMaxDids: config.defaultTenantLimits.maxDids,
+        sessionSecret: config.auth.sessionSecret,
       }
       config.selfRegistration.enabled = true
       config.auth.required = true
       config.auth.localEnabled = true
       config.email.notificationsEnabled = true
       config.email.to = ['owner@example.com']
+      config.auth.sessionSecret = 'test-session-secret'
       config.defaultTenantLimits.maxDids = 99
 
       const delivered = {
@@ -1149,6 +1157,7 @@ async function main() {
         config.email.notificationsEnabled = previous.emailEnabled
         config.email.to = previous.emailTo
         config.defaultTenantLimits.maxDids = previous.defaultMaxDids
+        config.auth.sessionSecret = previous.sessionSecret
       }
     }
   )
@@ -1495,6 +1504,313 @@ async function main() {
       assert.equal(call.reviewedBy, 'Open Mode')
     })
   })
+
+  await runTest(
+    'password reset consumes its token once and revokes existing sessions',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { PasswordResetService } = await import(
+        './services/passwordResetService.js'
+      )
+      const { userRepository } = await import(
+        './repositories/userRepository.js'
+      )
+      const { hashPassword, verifyPassword } = await import(
+        './lib/password.js'
+      )
+      const { signSessionToken } = await import('./lib/token.js')
+      const { resolveSessionUser } = await import('./services/authService.js')
+
+      const tenantId = ensurePrimaryTenant(config.defaultTenant)
+      const sent: Array<{ email: string; token: string }> = []
+      const service = new PasswordResetService({
+        async sendPasswordReset(email: string, token: string) {
+          sent.push({ email, token })
+          return true
+        },
+      })
+
+      const local = userRepository.create({
+        email: 'reset-me@example.com',
+        displayName: 'Reset Me',
+        passwordHash: hashPassword('original-password'),
+        role: 'member',
+        tenantId,
+      })
+      const sso = userRepository.create({
+        email: 'sso-user@example.com',
+        displayName: 'SSO User',
+        passwordHash: null,
+        role: 'member',
+        tenantId,
+        authProvider: 'oidc',
+      })
+
+      // A session issued before the reset.
+      const oldToken = signSessionToken(local.id, local.sessionEpoch)
+      assert.equal(resolveSessionUser(oldToken)?.id, local.id)
+
+      // Unknown addresses and SSO accounts are silent no-ops: no mail, no throw.
+      await service.request('nobody@example.com')
+      await service.request(sso.email)
+      assert.equal(sent.length, 0)
+
+      await service.request(local.email)
+      assert.equal(sent.length, 1)
+      const token = sent[0]!.token
+
+      service.reset(token, 'a-brand-new-password')
+
+      const updated = userRepository.getById(local.id)!
+      assert.ok(verifyPassword('a-brand-new-password', updated.passwordHash!))
+      // The pre-reset session must no longer resolve — that is the whole point.
+      assert.equal(resolveSessionUser(oldToken), null)
+      assert.equal(
+        resolveSessionUser(signSessionToken(local.id, updated.sessionEpoch))?.id,
+        local.id
+      )
+      // The token is single-use.
+      assert.throws(
+        () => service.reset(token, 'yet-another-password'),
+        /Invalid or expired/
+      )
+
+      userRepository.remove(local.id)
+      userRepository.remove(sso.id)
+    }
+  )
+
+  await runTest('totp matches RFC 6238 vectors and tolerates clock skew', async () => {
+    const { totpCodeForCounter, verifyTotp, base32Encode, base32Decode } =
+      await import('./lib/totp.js')
+
+    // RFC 6238 appendix B: the SHA-1 secret is the ASCII "12345678901234567890".
+    const secret = base32Encode(Buffer.from('12345678901234567890'))
+    assert.equal(base32Decode(secret).toString(), '12345678901234567890')
+    // T=59s and T=1111111109s fall in steps 1 and 37037036.
+    assert.equal(totpCodeForCounter(secret, 1), '287082')
+    assert.equal(totpCodeForCounter(secret, 37037036), '081804')
+
+    // Codes one step either side are accepted; two steps away is not.
+    const now = 37037036 * 30 * 1000
+    assert.equal(verifyTotp(secret, '081804', now), true)
+    assert.equal(verifyTotp(secret, totpCodeForCounter(secret, 37037035), now), true)
+    assert.equal(verifyTotp(secret, totpCodeForCounter(secret, 37037037), now), true)
+    assert.equal(verifyTotp(secret, totpCodeForCounter(secret, 37037034), now), false)
+    assert.equal(verifyTotp(secret, 'abcdef', now), false)
+  })
+
+  await runTest(
+    'mfa gates login and recovery codes are single-use',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { AuthService } = await import('./services/authService.js')
+      const { MfaService } = await import('./services/mfaService.js')
+      const { userRepository } = await import(
+        './repositories/userRepository.js'
+      )
+      const { hashPassword } = await import('./lib/password.js')
+      const { currentTotpCode } = await import('./lib/totp.js')
+      const { verifySignedToken } = await import('./lib/token.js')
+
+      const tenantId = ensurePrimaryTenant(config.defaultTenant)
+      const mfaService = new MfaService()
+      const authService = new AuthService(undefined, mfaService)
+
+      const created = userRepository.create({
+        email: 'mfa-user@example.com',
+        displayName: 'MFA User',
+        passwordHash: hashPassword('correct-horse-battery-staple'),
+        role: 'member',
+        tenantId,
+      })
+
+      // Without MFA the password alone completes the login.
+      const plain = await authService.login(
+        'mfa-user@example.com',
+        'correct-horse-battery-staple'
+      )
+      assert.ok('token' in plain)
+
+      const { secret } = mfaService.beginEnrollment(created.id, 'ComFlow')
+      // Enrollment is not live until a valid code confirms it.
+      const stillPlain = await authService.login(
+        'mfa-user@example.com',
+        'correct-horse-battery-staple'
+      )
+      assert.ok('token' in stillPlain)
+      assert.throws(
+        () => mfaService.confirmEnrollment(created.id, '000000'),
+        /not valid/
+      )
+
+      const { recoveryCodes } = mfaService.confirmEnrollment(
+        created.id,
+        currentTotpCode(secret)
+      )
+      assert.equal(recoveryCodes.length, 10)
+
+      const challenged = await authService.login(
+        'mfa-user@example.com',
+        'correct-horse-battery-staple'
+      )
+      assert.ok('mfaRequired' in challenged)
+      const challengeToken = (challenged as { challengeToken: string })
+        .challengeToken
+      // An MFA challenge must never be usable as a session token.
+      assert.equal(verifySignedToken(challengeToken, 'session'), null)
+
+      assert.throws(
+        () => authService.completeMfaLogin(challengeToken, '000000'),
+        /Invalid verification code/
+      )
+      const granted = authService.completeMfaLogin(
+        challengeToken,
+        currentTotpCode(secret)
+      )
+      assert.equal(granted.user.id, created.id)
+
+      // A recovery code works once, then is consumed.
+      const second = await authService.login(
+        'mfa-user@example.com',
+        'correct-horse-battery-staple'
+      )
+      const secondToken = (second as { challengeToken: string }).challengeToken
+      assert.ok(authService.completeMfaLogin(secondToken, recoveryCodes[0]!))
+      assert.equal(
+        userRepository.getById(created.id)!.totpRecoveryCodes.length,
+        9
+      )
+      const third = await authService.login(
+        'mfa-user@example.com',
+        'correct-horse-battery-staple'
+      )
+      const thirdToken = (third as { challengeToken: string }).challengeToken
+      assert.throws(
+        () => authService.completeMfaLogin(thirdToken, recoveryCodes[0]!),
+        /Invalid verification code/
+      )
+
+      mfaService.disable(created.id)
+      const afterDisable = await authService.login(
+        'mfa-user@example.com',
+        'correct-horse-battery-staple'
+      )
+      assert.ok('token' in afterDisable)
+
+      userRepository.remove(created.id)
+    }
+  )
+
+  await runTest(
+    'subscription webhooks materialize band limits through upgrade, downgrade, and cancel',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { BillingService } = await import('./services/billingService.js')
+      const { tenantLimitsRepository } = await import(
+        './repositories/tenantLimitsRepository.js'
+      )
+      const { billingRepository } = await import(
+        './repositories/billingRepository.js'
+      )
+      const { PLAN_CATALOG } = await import('../../shared/src/index.js')
+
+      const tenantId = ensurePrimaryTenant(config.defaultTenant)
+      const service = new BillingService(undefined, {
+        async sendTenantFrozenAlert() {
+          return true
+        },
+      })
+
+      const period = (band: string, status: string, cancel = false) =>
+        JSON.stringify({
+          id: `evt-sub-${band}-${status}-${cancel}`,
+          type: 'subscription_updated',
+          tenantId,
+          subscription: {
+            stripeSubscriptionId: 'sub_test_1',
+            status,
+            band,
+            currentPeriodStart: '2026-07-01T00:00:00.000Z',
+            currentPeriodEnd: '2026-08-01T00:00:00.000Z',
+            cancelAtPeriodEnd: cancel,
+          },
+        })
+
+      // Subscribe to Solo: limits follow the catalog.
+      await service.handleWebhook(period('solo', 'active'), undefined)
+      let limits = tenantLimitsRepository.get(tenantId)
+      assert.equal(limits.maxDids, PLAN_CATALOG.solo.maxDids)
+      assert.equal(limits.includedMinutes, PLAN_CATALOG.solo.includedMinutes)
+      assert.equal(service.subscription(tenantId).band, 'solo')
+
+      // Upgrade to Business.
+      await service.handleWebhook(period('business', 'active'), undefined)
+      limits = tenantLimitsRepository.get(tenantId)
+      assert.equal(limits.maxDids, PLAN_CATALOG.business.maxDids)
+      assert.equal(
+        limits.maxConcurrentCalls,
+        PLAN_CATALOG.business.maxConcurrentCalls
+      )
+
+      // Downgrade back to Pro.
+      await service.handleWebhook(period('pro', 'active'), undefined)
+      assert.equal(
+        tenantLimitsRepository.get(tenantId).maxDids,
+        PLAN_CATALOG.pro.maxDids
+      )
+
+      // past_due still grants service — Stripe is still retrying.
+      await service.handleWebhook(period('pro', 'past_due'), undefined)
+      assert.equal(
+        tenantLimitsRepository.get(tenantId).maxDids,
+        PLAN_CATALOG.pro.maxDids
+      )
+      assert.equal(service.subscription(tenantId).status, 'past_due')
+
+      // Cancel-at-period-end keeps the band until the period actually ends.
+      await service.handleWebhook(period('pro', 'active', true), undefined)
+      assert.equal(service.subscription(tenantId).cancelAtPeriodEnd, true)
+      assert.equal(
+        tenantLimitsRepository.get(tenantId).maxDids,
+        PLAN_CATALOG.pro.maxDids
+      )
+
+      // Cancellation drops to no-service limits but keeps the tenant.
+      await service.handleWebhook(period('pro', 'canceled'), undefined)
+      assert.equal(service.subscription(tenantId).band, 'free')
+      assert.equal(tenantLimitsRepository.get(tenantId).maxDids, 0)
+      assert.ok(billingRepository.get(tenantId).stripeSubscriptionId)
+
+      // Exhausted retries also drop to free, recorded as unpaid.
+      await service.handleWebhook(period('pro', 'active'), undefined)
+      await service.handleWebhook(
+        JSON.stringify({
+          id: 'evt-sub-unpaid',
+          type: 'subscription_payment_failed',
+          tenantId,
+        }),
+        undefined
+      )
+      assert.equal(service.subscription(tenantId).status, 'unpaid')
+      assert.equal(tenantLimitsRepository.get(tenantId).maxDids, 0)
+
+      // Replaying a processed event must not change anything.
+      const before = JSON.stringify(service.subscription(tenantId))
+      await service.handleWebhook(
+        JSON.stringify({
+          id: 'evt-sub-unpaid',
+          type: 'subscription_payment_failed',
+          tenantId,
+        }),
+        undefined
+      )
+      assert.equal(JSON.stringify(service.subscription(tenantId)), before)
+    }
+  )
 
   const { db } = await getModules()
   db.close()

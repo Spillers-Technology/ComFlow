@@ -7,6 +7,11 @@ export type TenantBilling = {
   creditCents: number
   pendingTopUpCents: number
   pendingTopUpExpiresAt: string | null
+  stripeSubscriptionId: string | null
+  subscriptionStatus: string | null
+  currentPeriodStart: string | null
+  currentPeriodEnd: string | null
+  cancelAtPeriodEnd: boolean
 }
 
 type BillingRow = {
@@ -17,6 +22,11 @@ type BillingRow = {
   credit_cents: number
   pending_topup_cents: number
   pending_topup_expires_at: string | null
+  stripe_subscription_id: string | null
+  subscription_status: string | null
+  current_period_start: string | null
+  current_period_end: string | null
+  cancel_at_period_end: number
   updated_at: string
 }
 
@@ -34,6 +44,11 @@ export const billingRepository = {
         creditCents: row.credit_cents,
         pendingTopUpCents: row.pending_topup_cents,
         pendingTopUpExpiresAt: row.pending_topup_expires_at,
+        stripeSubscriptionId: row.stripe_subscription_id,
+        subscriptionStatus: row.subscription_status,
+        currentPeriodStart: row.current_period_start,
+        currentPeriodEnd: row.current_period_end,
+        cancelAtPeriodEnd: Boolean(row.cancel_at_period_end),
       }
     }
     db.prepare(`
@@ -48,7 +63,57 @@ export const billingRepository = {
       creditCents: 0,
       pendingTopUpCents: 0,
       pendingTopUpExpiresAt: null,
+      stripeSubscriptionId: null,
+      subscriptionStatus: null,
+      currentPeriodStart: null,
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
     }
+  },
+
+  /** Reverse lookup for subscription webhooks, which carry no tenant metadata. */
+  tenantIdBySubscription(subscriptionId: string): string | null {
+    const row = db
+      .prepare(
+        'SELECT tenant_id FROM tenant_billing WHERE stripe_subscription_id = ?'
+      )
+      .get(subscriptionId) as { tenant_id: string } | undefined
+    return row?.tenant_id ?? null
+  },
+
+  /**
+   * Record the current state of a tenant's subscription. Called from webhooks,
+   * so it is a full overwrite rather than a partial patch — Stripe's payload is
+   * the source of truth for every field here.
+   */
+  setSubscription(
+    tenantId: string,
+    input: {
+      band: string
+      stripeSubscriptionId: string | null
+      status: string | null
+      currentPeriodStart: string | null
+      currentPeriodEnd: string | null
+      cancelAtPeriodEnd: boolean
+    }
+  ): void {
+    this.get(tenantId)
+    db.prepare(`
+      UPDATE tenant_billing
+      SET plan = ?, stripe_subscription_id = ?, subscription_status = ?,
+          current_period_start = ?, current_period_end = ?,
+          cancel_at_period_end = ?, updated_at = ?
+      WHERE tenant_id = ?
+    `).run(
+      input.band,
+      input.stripeSubscriptionId,
+      input.status,
+      input.currentPeriodStart,
+      input.currentPeriodEnd,
+      input.cancelAtPeriodEnd ? 1 : 0,
+      new Date().toISOString(),
+      tenantId
+    )
   },
 
   /** Reverse lookup for provider webhooks that only carry a customer id. */

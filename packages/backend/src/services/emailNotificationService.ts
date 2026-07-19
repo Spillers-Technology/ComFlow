@@ -115,6 +115,34 @@ export class EmailNotificationService {
     return true
   }
 
+  async sendPasswordReset(
+    email: string,
+    token: string,
+    ttlHours: number
+  ): Promise<boolean> {
+    if (!config.email.notificationsEnabled) return false
+
+    const base = config.email.publicUrl.replace(/\/$/, '')
+    const link = `${base}/reset-password?token=${encodeURIComponent(token)}`
+    await this.transport.sendMail({
+      from: config.email.from,
+      to: email,
+      subject: '[ComFlow] Reset your password',
+      text: [
+        'Someone asked to reset the ComFlow password for this address.',
+        '',
+        `Set a new password (link expires in ${ttlHours} hour${
+          ttlHours === 1 ? '' : 's'
+        }):`,
+        '',
+        link,
+        '',
+        'If this was not you, ignore this message — your password is unchanged.',
+      ].join('\n'),
+    })
+    return true
+  }
+
   /** Operator alert: a tenant was automatically frozen (e.g. chargeback). */
   async sendTenantFrozenAlert(input: {
     tenantName: string
