@@ -1,27 +1,22 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
 } from 'react'
-import { SsoProviderInfo, User } from '../../../shared/src/index.js'
-import { getMe, login as apiLogin, setToken } from '../lib/api'
-
-interface AuthState {
-  user: User | null
-  authRequired: boolean
-  localEnabled: boolean
-  providers: SsoProviderInfo[]
-  ssoError: string | null
-  loading: boolean
-  login: (email: string, password: string) => Promise<void>
-  logout: () => void
-  refresh: () => Promise<void>
-}
-
-const AuthContext = createContext<AuthState | null>(null)
+import {
+  RegisterRequest,
+  SsoProviderInfo,
+  User,
+} from '../../../shared/src/index.js'
+import {
+  getMe,
+  login as apiLogin,
+  register as apiRegister,
+  setToken,
+  verifyEmail as apiVerifyEmail,
+} from '../lib/api'
+import { AuthStateContext } from './authState'
 
 /**
  * After an SSO round-trip the backend redirects to `…/login#token=<token>`
@@ -47,6 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [authRequired, setAuthRequired] = useState(false)
   const [localEnabled, setLocalEnabled] = useState(true)
+  const [selfRegistrationEnabled, setSelfRegistrationEnabled] = useState(false)
   const [providers, setProviders] = useState<SsoProviderInfo[]>([])
   const [ssoError, setSsoError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -57,6 +53,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(me.user)
       setAuthRequired(me.authRequired)
       setLocalEnabled(me.localEnabled)
+      // Self-registration creates a local password account. Do not offer it in
+      // an SSO-only deployment where that account could not sign in later.
+      setSelfRegistrationEnabled(
+        me.selfRegistrationEnabled && me.localEnabled
+      )
       setProviders(me.providers)
     } catch {
       setUser(null)
@@ -81,6 +82,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
+  const register = useCallback(async (input: RegisterRequest) => {
+    const result = await apiRegister(input)
+    setToken(result.token)
+    setUser(result.user)
+    return result
+  }, [])
+
+  const verifyEmail = useCallback(async (token: string) => {
+    const result = await apiVerifyEmail(token)
+    setUser(current =>
+      current?.id === result.user.id ? result.user : current
+    )
+    return result.user
+  }, [])
+
   const logout = useCallback(() => {
     setToken(null)
     setUser(null)
@@ -91,10 +107,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       authRequired,
       localEnabled,
+      selfRegistrationEnabled,
       providers,
       ssoError,
       loading,
       login,
+      register,
+      verifyEmail,
       logout,
       refresh,
     }),
@@ -102,22 +121,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       authRequired,
       localEnabled,
+      selfRegistrationEnabled,
       providers,
       ssoError,
       loading,
       login,
+      register,
+      verifyEmail,
       logout,
       refresh,
     ]
   )
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
-}
-
-export function useAuth(): AuthState {
-  const context = useContext(AuthContext)
-  if (!context) {
-    throw new Error('useAuth must be used within an AuthProvider')
-  }
-  return context
+  return (
+    <AuthStateContext.Provider value={value}>
+      {children}
+    </AuthStateContext.Provider>
+  )
 }

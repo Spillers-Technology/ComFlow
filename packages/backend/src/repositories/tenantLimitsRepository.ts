@@ -1,4 +1,4 @@
-import { TenantLimits } from '../../../shared/src/index.js'
+import { TenantLimits, TenantLimitsSchema } from '../../../shared/src/index.js'
 import { config } from '../config.js'
 import { db } from '../db/client.js'
 
@@ -21,6 +21,41 @@ function mapRow(row: LimitsRow): TenantLimits {
 }
 
 export const tenantLimitsRepository = {
+  materialize(tenantId: string, limits: TenantLimits): TenantLimits {
+    const value = TenantLimitsSchema.parse(limits)
+    const now = new Date().toISOString()
+    db.prepare(`
+      INSERT INTO tenant_limits (
+        tenant_id, max_concurrent_calls, max_dids, included_minutes, markup_bps, updated_at
+      )
+      VALUES (@tenant_id, @max_concurrent_calls, @max_dids, @included_minutes, @markup_bps, @updated_at)
+      ON CONFLICT(tenant_id) DO UPDATE SET
+        max_concurrent_calls = excluded.max_concurrent_calls,
+        max_dids = excluded.max_dids,
+        included_minutes = excluded.included_minutes,
+        markup_bps = excluded.markup_bps,
+        updated_at = excluded.updated_at
+    `).run({
+      tenant_id: tenantId,
+      max_concurrent_calls: value.maxConcurrentCalls,
+      max_dids: value.maxDids,
+      included_minutes: value.includedMinutes,
+      markup_bps: value.markupBps,
+      updated_at: now,
+    })
+    return value
+  },
+
+  materializeSelfRegistrationPlan(tenantId: string, plan: string): TenantLimits {
+    if (plan !== config.selfRegistration.plan || plan !== 'solo') {
+      throw new Error(`Unsupported self-registration plan: ${plan}`)
+    }
+    return this.materialize(
+      tenantId,
+      TenantLimitsSchema.parse(config.selfRegistration.planLimits)
+    )
+  },
+
   /** A tenant's limits, lazily seeded from config defaults on first read. */
   get(tenantId: string): TenantLimits {
     const row = db

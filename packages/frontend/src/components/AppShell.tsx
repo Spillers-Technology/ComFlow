@@ -7,7 +7,7 @@ import {
   Typography,
 } from '@mui/material'
 import { NavLink } from 'react-router-dom'
-import { useAuth } from '../app/AuthContext'
+import { useAuth } from '../app/useAuth'
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, authRequired, logout } = useAuth()
@@ -29,6 +29,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Button color="inherit" component={NavLink} to="/scheduled-calls">
               Scheduled
             </Button>
+            {authRequired && isAdmin && (
+              <Button color="inherit" component={NavLink} to="/onboarding">
+                Setup
+              </Button>
+            )}
             {isAdmin && (
               <Button color="inherit" component={NavLink} to="/settings">
                 Settings

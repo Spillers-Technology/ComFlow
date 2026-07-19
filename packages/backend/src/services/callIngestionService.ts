@@ -7,8 +7,9 @@ import {
 import { config } from '../config.js'
 import { createSilentWav } from '../lib/audio.js'
 import { HttpError } from '../lib/errors.js'
+import { assertTenantActive } from '../lib/tenantGuards.js'
 import { callRepository } from '../repositories/callRepository.js'
-import { tenantRepository } from '../repositories/tenantRepository.js'
+import { BillingService } from './billingService.js'
 import { EmailNotificationService } from './emailNotificationService.js'
 import { EngineService } from './engineService.js'
 import { MailboxService } from './mailboxService.js'
@@ -26,22 +27,28 @@ export class CallIngestionService {
     private readonly engineService: EngineService,
     private readonly emailNotificationService: EmailNotificationService,
     private readonly mailboxService: MailboxService = new MailboxService(),
-    private readonly usageService: UsageService = new UsageService()
+    private readonly usageService: UsageService = new UsageService(),
+    private readonly billingService: BillingService = new BillingService()
   ) {}
+
+  /** Resolve a DID and reject unpaid/frozen tenants before any paid work. */
+  assertCanAcceptInbound(input: {
+    toNumber?: string | null
+    accountLabel?: string | null
+  }) {
+    const routing = this.mailboxService.resolveInbound(input)
+    assertTenantActive(routing.tenantId)
+    this.billingService.assertHasBalance(routing.tenantId)
+    return routing
+  }
 
   async createInboundCall(input: InboundTelephonyWebhookInput) {
     // Route by dialed DID / receiving SIP account, else the primary tenant's
     // default mailbox. The match pins both the mailbox and its owning tenant.
-    const routing = this.mailboxService.resolveInbound({
+    const routing = this.assertCanAcceptInbound({
       toNumber: input.toNumber,
       accountLabel: input.accountLabel,
     })
-    // Frozen tenants get no inbound service: their calls are refused rather
-    // than accruing STT/LLM/minute costs nobody will pay for.
-    const tenant = tenantRepository.getById(routing.tenantId)
-    if (tenant && tenant.status !== 'active') {
-      throw new HttpError(403, 'Tenant is suspended; inbound service disabled.')
-    }
     const call = callRepository.createInitial({
       telephonyCallId: input.telephonyCallId,
       source: input.source,
@@ -77,6 +84,11 @@ export class CallIngestionService {
     const call = callRepository.getByTelephonyCallId(input.telephonyCallId)
     if (!call) {
       throw new HttpError(404, 'Call not found for telephony call id.')
+    }
+    const tenantId = callRepository.tenantIdOf(call.id)
+    if (tenantId) {
+      assertTenantActive(tenantId)
+      this.billingService.assertHasBalance(tenantId)
     }
 
     const relativePath = path.join(
@@ -125,7 +137,6 @@ export class CallIngestionService {
       recordingMimeType: input.mimeType,
     })
 
-    const tenantId = callRepository.tenantIdOf(call.id)
     if (tenantId) this.usageService.recordVoicemailProcessing(tenantId, call.id)
     void this.notifyProcessedVoicemail(processed)
     return processed

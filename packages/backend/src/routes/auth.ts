@@ -2,6 +2,7 @@ import { Router, urlencoded } from 'express'
 import {
   LoginRequestSchema,
   RegisterRequestSchema,
+  ResendVerificationRequestSchema,
   VerifyEmailRequestSchema,
 } from '../../../shared/src/index.js'
 import { config } from '../config.js'
@@ -23,8 +24,7 @@ export function createAuthRouter(
     return {
       localEnabled: config.auth.localEnabled,
       providers: ssoService.listProviderInfo(),
-      selfRegistrationEnabled:
-        config.selfRegistration.enabled && config.auth.required,
+      selfRegistrationEnabled: registrationService.enabled,
     }
   }
 
@@ -75,6 +75,18 @@ export function createAuthRouter(
       const input = parseBody(VerifyEmailRequestSchema, request.body)
       const user = registrationService.verifyEmail(input.token)
       response.json({ user })
+    })
+  )
+
+  // Always returns the same response so callers cannot use it to discover
+  // whether an address has an account. Delivery is rate-limited per source IP.
+  router.post(
+    '/resend-verification',
+    rateLimit({ windowMs: 15 * 60_000, max: 5 }),
+    asyncHandler(async (request, response) => {
+      const input = parseBody(ResendVerificationRequestSchema, request.body)
+      await registrationService.resendVerification(input.email)
+      response.json({ accepted: true })
     })
   )
 

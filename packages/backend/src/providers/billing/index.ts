@@ -18,6 +18,11 @@ export function createBillingProvider(): BillingProvider {
         'COMFLOW_BILLING_PROVIDER=stripe requires STRIPE_SECRET_KEY.'
       )
     }
+    if (!stripeWebhookSecret) {
+      throw new Error(
+        'COMFLOW_BILLING_PROVIDER=stripe requires STRIPE_WEBHOOK_SECRET.'
+      )
+    }
     return new StripeBillingProvider({
       secretKey: stripeSecretKey!,
       webhookSecret: stripeWebhookSecret,

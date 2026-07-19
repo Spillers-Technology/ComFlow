@@ -99,9 +99,15 @@ SIP source ──SIP/RTP──▶ baresip (SIP edge) ──ctrl_tcp──▶ Com
 - **Multi-tenant**: a hard `tenant_id` boundary isolates every customer's
   users, mailboxes, DIDs, and voicemails. A platform `owner` manages tenants
   and plans; each tenant has its own `admin`.
+- **Optional public signup**: hosted operators can enable an email-verified
+  self-registration flow that atomically creates a finite `solo` tenant and its
+  first admin. Signup stays off for self-hosted installs unless explicitly enabled.
 - **On-the-fly DID provisioning**: order numbers from a SIP trunk provider
   (VoIP.ms) over its API and bind them to a tenant's mailbox — forward your line
   to the DID and it answers. A `fake` provider backs dev/tests.
+- **Guided call forwarding**: after provisioning, customers choose missed-call
+  or all-call forwarding and get carrier-specific dial codes, QR codes,
+  tap-to-dial links, deactivation instructions, and a copy-to-dial fallback.
 - **Usage metering & prepaid wallet**: per-tenant metering of minutes, AI, and
   DID rental with transparent carrier-vs-charged pricing; customers fund a Stripe
   prepaid wallet that usage draws down. Per-tenant limits and trunk concurrency
@@ -168,10 +174,16 @@ Playwright setup).
 
 ## API surface
 
-Open: `GET /api/health`, `POST /api/auth/login`, `GET /api/auth/me`,
+Open: `GET /api/health`, `POST /api/auth/login`, `POST /api/auth/register`,
+`POST /api/auth/{verify-email,resend-verification}`, `GET /api/auth/me`,
 `GET /api/auth/providers`, `GET /api/auth/sso/{provider}/start`,
 `GET /api/auth/oidc/callback`, `POST /api/auth/saml/acs`,
 `POST /api/webhooks/telephony/{inbound,recording-complete}`.
+
+The registration endpoints return `404` unless hosted self-registration is fully
+configured. Registration creates a local account, so it also requires local auth;
+verification and resend endpoints are rate-limited and resend responses do not
+reveal whether an address has an account.
 
 Guarded (pass-through in open mode): `/api/calls*`, `/api/scheduled-calls*`,
 `/api/prompts*`, `/api/mailboxes*`, `/api/settings/*`.
@@ -186,7 +198,8 @@ Admin-only: `/api/groups*` (RBAC group/membership/mailbox-grant management),
 
 Tenant-scoped: `GET /api/usage` (metered usage + transparent pricing),
 `GET /api/billing` (wallet). Owner-only: `/api/tenants*` (tenant/plan/limit
-management, seed org-admins). Open (machine-to-machine):
+management, seed org-admins, freeze/unfreeze, and `GET /api/tenants/:id/audit`).
+Open (machine-to-machine):
 `POST /api/webhooks/stripe` (signature-verified wallet credit).
 
 MCP: `POST /api/mcp` (Streamable HTTP) requires `Authorization: Bearer cf_...`.
@@ -226,6 +239,12 @@ All env vars are documented in [.env.example](.env.example). Highlights:
 - **Auth**: `COMFLOW_AUTH_REQUIRED` (default `false`), `AUTH_SESSION_SECRET`/TTL,
   `COMFLOW_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD}`, `AUTH_LOCAL_ENABLED`,
   `AUTH_ADMIN_EMAILS` (promote-to-admin-on-SSO-login allowlist).
+- **Public self-registration**: `COMFLOW_SELF_REGISTRATION=true` enables the
+  hosted signup flow only when required auth, local accounts, and email
+  notifications are also enabled. `COMFLOW_SELF_REGISTRATION_PLAN=solo`,
+  `COMFLOW_SELF_REGISTRATION_{MAX_DIDS,MAX_CONCURRENT,INCLUDED_MINUTES,MARKUP_BPS}`,
+  `COMFLOW_SELF_REGISTRATION_MAX_LIFETIME_CREDIT_CENTS`, and
+  `COMFLOW_EMAIL_VERIFICATION_TTL_HOURS` define its finite risk envelope.
 - **SSO**: OIDC via `OIDC_{ISSUER_URL,CLIENT_ID,CLIENT_SECRET,REDIRECT_URI}`
   (Authentik-aligned, auto-enabled when set) and SAML 2.0 via
   `SAML_{ENTRY_POINT,ISSUER,IDP_CERT,CALLBACK_URL}`. Both provision users on first
@@ -245,29 +264,53 @@ All env vars are documented in [.env.example](.env.example). Highlights:
   `VOIPMS_SUBACCOUNT` (trunk the DIDs route to), `VOIPMS_DEFAULT_STATE`. Absent
   these, a `fake` provider is used. Override with `COMFLOW_SIP_TRUNK_PROVIDER`.
 - **Stripe billing**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
-  `STRIPE_{SUCCESS,CANCEL}_URL`. Absent these, a `fake` billing provider is used
-  and wallet balance is not enforced (self-host stays friction-free).
+  `STRIPE_{SUCCESS,CANCEL}_URL`, `COMFLOW_MAX_TOPUP_CENTS`. Stripe mode refuses
+  to start without a webhook secret. Absent Stripe credentials, a `fake` billing
+  provider is used; non-free tenants remain wallet-gated so hosted dry-runs still
+  test the fraud boundary. `COMFLOW_BILLING_ENFORCED=true` extends that gate to
+  free tenants. Self-registered tenants additionally reserve pending checkouts
+  against `COMFLOW_SELF_REGISTRATION_MAX_LIFETIME_CREDIT_CENTS`; the default
+  all-time settled-credit ceiling is $200 per tenant.
 
 ## Hosting it for others (SaaS)
 
 ComFlow runs two ways: **bring your own trunk and self-host** (open or local-auth
 mode, single tenant — nothing below is required), or **run it as a service** for
-others. In hosted mode (`COMFLOW_AUTH_REQUIRED=true`) you operate one VoIP.ms
-account and one set of AI keys; each customer is an isolated tenant that forwards
-their calls to a DID you provision, funds a Stripe prepaid wallet, and signs in to
-their own voicemails.
+others. In hosted mode you can enable public signup so a customer verifies their
+email, funds a prepaid wallet, provisions a DID, and follows the guided forwarding
+step without operator-created credentials.
+
+Self-registration does not turn fake providers into a phone service. Use the fake
+billing/SIP adapters for a local dry run; a public paid deployment still needs
+signed Stripe webhooks, real DID-provider credentials, a working SIP edge, SMTP,
+bounded plan limits, and an operator notification recipient.
+
+The built-in ceilings bound one self-registered tenant, not a fraudster creating
+many accounts or reusing payment instruments. Pair them with edge rate limits,
+Stripe Radar/3DS and payment-instrument velocity controls, and provider-side
+spend/channel limits before opening registration.
 
 Two end-to-end playbooks, with copy-paste scripts:
 
 - [Onboard a team account](docs/runbooks/onboard-team-account.md) — a customer
   org with its own admin and isolated mailboxes/DIDs.
 - [Onboard a paid forward-to user](docs/runbooks/onboard-paid-forward-to-user.md)
-  — a single user on a monthly plan with one DID and a Stripe wallet.
+  — the public self-serve path plus its operator verification checklist.
+- [Operate hosted fraud controls](docs/runbooks/hosted-fraud-controls.md) — wallet
+  gates, chargeback freezes, audit review, alert retries, and reactivation.
 
 Operate the platform from the owner-only **Tenants** page in the UI (onboard
 orgs, set plan limits and markup, suspend/activate) or over the REST API (see
-`scripts/`). Self-serve signup is on the roadmap; today tenants are provisioned
-by the operator.
+`scripts/`). Public signup is off by default and is safe to expose only after the
+hosted checklist in the paid-user runbook passes.
+
+## Security and public-repository hygiene
+
+Never commit `.env`, SIP registration files, SQLite databases/WAL files, private
+keys, provider credentials, real caller recordings, or tenant exports. The ignore
+rules cover the standard local paths, but operators remain responsible for secret
+management and history review. See [SECURITY.md](SECURITY.md) for private reporting
+and first-response steps if something sensitive is exposed.
 
 ## Repo layout
 
@@ -281,6 +324,7 @@ by the operator.
 ├─ infra/baresip/  # SIP edge: Dockerfile, config, accounts (BYO credentials)
 ├─ scripts/        # operator scripts (provision tenants/DIDs, usage) — see runbooks
 ├─ docs/runbooks/  # end-to-end onboarding playbooks
+├─ SECURITY.md     # private vulnerability and accidental-secret reporting
 └─ docker-compose.yml
 ```
 

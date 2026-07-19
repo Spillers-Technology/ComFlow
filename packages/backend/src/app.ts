@@ -33,6 +33,7 @@ import { BaresipManagementService } from './services/baresipManagementService.js
 import { CallIngestionService } from './services/callIngestionService.js'
 import { BillingService } from './services/billingService.js'
 import { CallReviewService } from './services/callReviewService.js'
+import { ConcurrencyService } from './services/concurrencyService.js'
 import { DidProvisioningService } from './services/didProvisioningService.js'
 import { UsageService } from './services/usageService.js'
 import { EmailNotificationService } from './services/emailNotificationService.js'
@@ -51,18 +52,27 @@ import { toApiUser } from './services/authService.js'
 
 export function createApp() {
   const app = express()
+  if (config.trustProxy) app.set('trust proxy', 1)
   const telephonyProvider = new FakeTelephonyProvider()
   const engineService = new EngineService()
   const emailNotificationService = new EmailNotificationService()
+  const billingService = new BillingService(undefined, emailNotificationService)
+  const usageService = new UsageService()
+  const mailboxService = new MailboxService()
+  const concurrencyService = new ConcurrencyService()
   const callIngestionService = new CallIngestionService(
     engineService,
-    emailNotificationService
+    emailNotificationService,
+    mailboxService,
+    usageService,
+    billingService
   )
   const callReviewService = new CallReviewService()
   const authService = new AuthService()
   const ssoService = new SsoService()
   const registrationService = new RegistrationService(emailNotificationService)
-  const mailboxService = new MailboxService()
+  registrationService.assertConfiguration()
+  billingService.assertHostedConfiguration()
   // Ensure the primary tenant exists and back-fill pre-tenancy rows onto it,
   // then bootstrap the owner + that tenant's default mailbox.
   const primaryTenantId = ensurePrimaryTenant(config.defaultTenant)
@@ -74,7 +84,8 @@ export function createApp() {
   const audioPromptService = new AudioPromptService()
   const telephonyGateway = new TelephonyGatewayService(
     callIngestionService,
-    audioPromptService
+    audioPromptService,
+    concurrencyService
   )
   const baresipManagementService = new BaresipManagementService(
     telephonyGateway
@@ -82,11 +93,14 @@ export function createApp() {
   const scheduledCallService = new ScheduledCallService(
     engineService,
     telephonyGateway,
-    audioPromptService
+    audioPromptService,
+    usageService,
+    billingService
   )
-  const didProvisioningService = new DidProvisioningService()
-  const usageService = new UsageService()
-  const billingService = new BillingService()
+  const didProvisioningService = new DidProvisioningService(
+    undefined,
+    billingService
+  )
 
   function assertWithinDataDir(filePath: string, directory: string) {
     const resolvedFile = path.resolve(filePath)
@@ -345,6 +359,14 @@ export function createApp() {
   // now and once a day, so wallets reflect rental between usage-page reads.
   usageService.sweepDidRentals()
   setInterval(() => usageService.sweepDidRentals(), 24 * 60 * 60 * 1000).unref()
+  void billingService.flushPendingAlerts().catch(error => {
+    console.error(`Failed to deliver pending billing alert: ${error.message}`)
+  })
+  setInterval(() => {
+    void billingService.flushPendingAlerts().catch(error => {
+      console.error(`Failed to deliver pending billing alert: ${error.message}`)
+    })
+  }, 5 * 60 * 1000).unref()
 
   app.use(
     cors({
@@ -392,7 +414,7 @@ export function createApp() {
     createSettingsRouter(engineService, baresipManagementService)
   )
   app.use('/api/calls', requireAuth, createCallsRouter(callReviewService))
-  app.use('/api/me', requireAuth, createMeRouter())
+  app.use('/api/me', requireAuth, createMeRouter(registrationService))
   app.use('/api/prompts', requireAuth, createPromptsRouter(audioPromptService))
   app.use(
     '/api/scheduled-calls',

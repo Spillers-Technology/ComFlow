@@ -1,88 +1,140 @@
 # Runbook: Onboard a paid forward-to user
 
-**Case study 2.** A single user on a monthly plan with basic usage limits and one
-DID to forward their calls to. They pay via Stripe; usage draws down a prepaid
-wallet.
+This is the hosted self-serve path for a single user with an isolated `solo`
+tenant, a prepaid wallet, one forward-to DID, and guided call-forwarding setup.
+The operator verifies controls; they do not create the customer account.
 
-## Prerequisites
+## Release gate
 
-- Hosted ComFlow (`COMFLOW_AUTH_REQUIRED=true`).
-- Stripe configured: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and a webhook
-  endpoint pointed at `POST /api/webhooks/stripe` (event:
-  `checkout.session.completed`). Use Stripe **test mode** for the dry run.
-- A SIP trunk provider (`VOIPMS_*`), or the `fake` provider for a dry run.
-- An **owner** `cf_` API key.
+Do not expose public registration until all of these are true:
+
+- `COMFLOW_AUTH_REQUIRED=true` and `AUTH_LOCAL_ENABLED=true`.
+- `COMFLOW_SELF_REGISTRATION=true` and
+  `COMFLOW_SELF_REGISTRATION_PLAN=solo`.
+- SMTP delivery works, `COMFLOW_EMAIL_NOTIFICATIONS_ENABLED=true`,
+  `COMFLOW_PUBLIC_URL` points at the public app, and at least one
+  `COMFLOW_NOTIFICATION_EMAIL_TO` recipient receives fraud alerts.
+- The `COMFLOW_SELF_REGISTRATION_*` limits are finite. The recommended starting
+  envelope is one DID, two concurrent calls, and a $200 all-time settled-credit
+  ceiling (`COMFLOW_SELF_REGISTRATION_MAX_LIFETIME_CREDIT_CENTS=20000`).
+- Wallet enforcement is on. A non-free `solo` tenant is enforced even with the
+  fake adapter; set `COMFLOW_BILLING_ENFORCED=true` explicitly for a hosted dry run.
+- For a real service, Stripe has both its secret key and webhook signing secret,
+  and its webhook targets `POST /api/webhooks/stripe`.
+- For a real phone number, the DID provider and SIP edge are configured. Fake
+  billing, fake DID provisioning, and fake telephony prove application flow only.
+- The checks in [Hosted fraud controls](hosted-fraud-controls.md) pass against a
+  disposable tenant.
+
+Example hosted configuration is documented in the repository's `.env.example`.
+Keep every real credential outside Git and inject it through the deployment's
+secret manager.
+
+## Customer flow
+
+### 1. Create the account
+
+The customer opens `/register` and submits their email, password, name, and
+optional organization. ComFlow atomically creates:
+
+- one `solo` tenant with materialized finite limits;
+- one local tenant-admin account; and
+- an audit entry for the registration.
+
+Duplicate email addresses are rejected case-insensitively. Public registration is
+rate-limited and remains off unless the full hosted configuration is ready.
+
+### 2. Verify the email address
+
+ComFlow emails a time-limited link to `/verify-email?token=...`. Until it is used,
+the customer cannot add funds or provision a DID. Tokens are stored as hashes,
+expire, and are replaced when a new link is requested. The resend endpoint always
+returns the same response so it does not reveal which addresses have accounts.
+
+If delivery fails, fix SMTP and use the resend flow. Do not bypass verification or
+mark the account verified directly in SQLite.
+
+### 3. Fund the prepaid wallet
+
+The onboarding page opens Checkout. A completed Checkout session credits nothing
+unless the payment is confirmed paid; supported asynchronous payment success is
+handled separately. Replayed provider events are idempotent.
+
+For a fake-provider dry run, post a unique synthetic settled event only after the
+email-verification step:
+
+```bash
+curl -sS -X POST "$COMFLOW_URL/api/webhooks/stripe" \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"evt_dry_run_unique","type":"payment_succeeded","tenantId":"<tenant-id>","amountCents":2000}'
+```
+
+Never expose the fake billing webhook on an Internet-facing deployment. Real
+Stripe mode refuses unsigned or incorrectly signed events.
+
+### 4. Provision the ComFlow DID
+
+After settled funds appear, the customer searches for a number and provisions it
+from the onboarding page. ComFlow enforces the tenant's DID cap and wallet before
+ordering. The new DID is bound to that tenant's mailbox.
+
+### 5. Configure call forwarding
+
+The forwarding step offers carrier-specific instructions:
+
+- **Missed calls** is recommended so the original phone still rings.
+- **All calls** is opt-in and warns that the original phone stops ringing.
+- QR and tap-to-dial are best-effort because some phones block MMI/star codes.
+- The exact dial string is always copyable, and deactivation instructions stay
+  visible beside activation instructions.
+
+The customer should confirm the carrier's current forwarding behavior, apply the
+code on the phone being forwarded, and place a missed-call test. ComFlow cannot
+remotely change the customer's carrier settings.
+
+### 6. Verify the first call
+
+Confirm that the call reaches the provisioned DID, appears only in the customer's
+tenant, is recorded/transcribed with the configured providers, and draws down the
+wallet as expected. A QR code rendering successfully is not proof that real SIP or
+carrier forwarding works.
+
+## Operator acceptance checklist
+
+Using an owner API key, inspect the disposable tenant:
 
 ```bash
 export COMFLOW_URL=https://comflow.example.com
 export COMFLOW_TOKEN=cf_<owner-key>
+
+curl -sS "$COMFLOW_URL/api/tenants/<tenant-id>/limits" \
+  -H "Authorization: Bearer $COMFLOW_TOKEN"
+curl -sS "$COMFLOW_URL/api/tenants/<tenant-id>/audit" \
+  -H "Authorization: Bearer $COMFLOW_TOKEN"
 ```
 
-## 1. Create the user's tenant + their admin login
+Verify all of the following before opening registration:
 
-A single paid user is just a one-person tenant where they are the org-admin.
+1. Registration created exactly one tenant/admin/limit/audit set.
+2. An unverified account cannot top up or provision a DID.
+3. A zero-balance `solo` tenant cannot provision a DID.
+4. Parallel checkout attempts reserve capacity and cannot exceed the configured
+   all-time settled-credit ceiling; expired/failed reservations release capacity.
+5. Settled fake funds unlock one DID, and a second DID is rejected at the cap.
+6. A fake dispute suspends the tenant, creates an audit row, and delivers the
+   operator alert; replaying the same event does not duplicate the action.
+7. The suspended tenant cannot provision or top up, and real telephony does not
+   accept or originate paid calls for it.
+8. Manual reactivation creates an unfreeze audit row.
 
-```bash
-node scripts/provision-tenant.mjs \
-  --name "Dana Smith" --slug dana --plan solo \
-  --admin-email dana@example.com --admin-password 'temp-password' \
-  --max-dids 1 --max-concurrent 2 --included-minutes 200 --markup-bps 15000
-```
+Keep public signup disabled if any item fails.
 
-`markup-bps 15000` means the customer is charged 1.5x the raw carrier/AI cost —
-the transparent margin shown on their usage page.
+## Ongoing operator work
 
-## 2. Customer funds the wallet (Stripe)
-
-Dana signs in, opens **Billing**, and clicks **Add funds** — or via API with
-Dana's token:
-
-```bash
-export COMFLOW_TOKEN=cf_<dana-key>
-curl -s -X POST "$COMFLOW_URL/api/billing/topup" \
-  -H "Authorization: Bearer $COMFLOW_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"amountCents": 2000}'    # → { "checkoutUrl": "https://checkout.stripe.com/..." }
-```
-
-Dana completes Stripe Checkout. Stripe calls `POST /api/webhooks/stripe`; the
-signature is verified and the wallet is credited **idempotently**. Confirm:
-
-```bash
-node scripts/tenant-usage.mjs    # shows wallet credit / balance
-```
-
-## 3. Provision the forward-to DID
-
-With a funded wallet (provisioning is blocked at $0 in hosted mode):
-
-```bash
-node scripts/provision-did.mjs --search NY --mailbox-name "Dana's line"
-# → Provisioned +1NXXNXXXXXX → mailbox <id>
-```
-
-Dana sets their cell/office to **forward to that DID**. Calls they miss are
-answered, recorded, transcribed, and appear under Dana's sign-in only.
-
-## 4. Ongoing
-
-- **Usage & cost**: `node scripts/tenant-usage.mjs` (or the Billing page) shows
-  minutes, AI spend, DID rental, carrier-vs-charged, and remaining balance.
-- **Low balance**: usage past the balance leaves it negative; provisioning new
-  paid actions is blocked until they top up again.
-- **Plan change**: `node scripts/set-tenant-plan.mjs <tenantId> --included-minutes 500`
-  (owner).
-
-## Verify (dry run with fakes)
-
-With `fake` SIP + `fake` billing and `COMFLOW_TELEPHONY=fake`:
-
-1. Run steps 1–3 (the fake billing webhook is a plain JSON POST — see below).
-2. Post a fake inbound webhook to the DID and confirm the voicemail shows only
-   under Dana's tenant and that the wallet was drawn down.
-
-```bash
-# Fake billing credit (no Stripe): the fake provider accepts a plain body.
-curl -s -X POST "$COMFLOW_URL/api/webhooks/stripe" \
-  -H 'Content-Type: application/json' \
-  -d '{"id":"evt_demo","type":"payment_succeeded","tenantId":"<dana-tenant-id>","amountCents":2000}'
-```
+- Review wallet, usage, plan limits, status, and the owner-only tenant audit feed.
+- Investigate every automatic freeze before reactivation.
+- Retry/repair failed billing-alert delivery; never treat a swallowed email error
+  as an acceptable fraud control.
+- Use `scripts/set-tenant-plan.mjs` for deliberate limit changes and record why.
+- Recalculate the maximum credible loss whenever top-up, provider pricing,
+  concurrency, DID limits, or dispute handling changes.

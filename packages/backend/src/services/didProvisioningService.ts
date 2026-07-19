@@ -5,6 +5,7 @@ import {
 } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
 import { assertTenantActive } from '../lib/tenantGuards.js'
+import { db } from '../db/client.js'
 import { auditRepository } from '../repositories/auditRepository.js'
 import { didRepository } from '../repositories/didRepository.js'
 import { mailboxRepository } from '../repositories/mailboxRepository.js'
@@ -42,43 +43,74 @@ export class DidProvisioningService {
   ): Promise<ProvisionedDid> {
     // Frozen tenants (chargeback/owner action) may not order numbers.
     assertTenantActive(tenantId)
-    if (didRepository.getByNumber(input.number)) {
-      throw new HttpError(409, 'That number is already provisioned.')
-    }
-
-    // Enforce the tenant's DID allowance before incurring carrier cost.
+    // Reserve a finite plan slot synchronously before awaiting the provider, so
+    // concurrent requests cannot both pass the cap and incur carrier cost.
     const limits = tenantLimitsRepository.get(tenantId)
-    if (didRepository.countActiveForTenant(tenantId) >= limits.maxDids) {
+    const reservation = didRepository.reserveProvisioning(
+      tenantId,
+      input.number,
+      limits.maxDids
+    )
+    if (reservation === 'number_unavailable') {
+      throw new HttpError(409, 'That number is already provisioned or pending.')
+    }
+    if (reservation === 'limit_reached') {
       throw new HttpError(
         403,
         `DID limit reached (${limits.maxDids}). Upgrade the plan to add more.`
       )
     }
 
-    // A DID rents monthly against the wallet — require funds before ordering.
-    this.billingService.assertHasBalance(tenantId)
+    let orderedNumber: string | null = null
+    let committed = false
+    try {
+      // A DID rents monthly against the wallet — require settled funds before
+      // ordering. Paid fake-provider tenants exercise this exact same gate.
+      this.billingService.assertHasBalance(tenantId)
+      const existingMailboxId = this.validateTargetMailbox(tenantId, input)
+      const ordered = await this.provider.orderDid(input.number)
+      orderedNumber = ordered.number
 
-    // Resolve the target mailbox first so a provider failure leaves no orphan.
-    const mailboxId = this.resolveTargetMailbox(tenantId, input)
-
-    const ordered = await this.provider.orderDid(input.number)
-
-    mailboxRepository.update(mailboxId, { number: ordered.number })
-    const did = didRepository.create({
-      tenantId,
-      number: ordered.number,
-      provider: this.provider.id,
-      monthlyCents: ordered.monthlyCents,
-      perMinuteCents: ordered.perMinuteCents,
-      mailboxId,
-    })
-    auditRepository.record({
-      actor,
-      action: 'did.provision',
-      tenantId,
-      detail: { number: did.number, monthlyCents: did.monthlyCents },
-    })
-    return did
+      const did = db.transaction(() => {
+        const mailboxId =
+          existingMailboxId ??
+          mailboxRepository.create({
+            name: input.mailboxName ?? `Line ${ordered.number}`,
+            number: null,
+            sipAccountRef: null,
+            greetingPromptId: null,
+            tenantId,
+          }).id
+        mailboxRepository.update(mailboxId, { number: ordered.number })
+        const created = didRepository.create({
+          tenantId,
+          number: ordered.number,
+          provider: this.provider.id,
+          monthlyCents: ordered.monthlyCents,
+          perMinuteCents: ordered.perMinuteCents,
+          mailboxId,
+        })
+        didRepository.releaseProvisioningReservation(tenantId, input.number)
+        auditRepository.record({
+          actor,
+          action: 'did.provision',
+          tenantId,
+          detail: { number: created.number, monthlyCents: created.monthlyCents },
+        })
+        return created
+      })()
+      committed = true
+      return did
+    } catch (error) {
+      // If local persistence fails after the provider order, best-effort release
+      // avoids an untracked monthly rental.
+      if (orderedNumber && !committed) {
+        await this.provider.releaseDid(orderedNumber).catch(() => undefined)
+      }
+      throw error
+    } finally {
+      didRepository.releaseProvisioningReservation(tenantId, input.number)
+    }
   }
 
   async release(tenantId: string, number: string, actor = 'system'): Promise<void> {
@@ -102,10 +134,10 @@ export class DidProvisioningService {
     })
   }
 
-  private resolveTargetMailbox(
+  private validateTargetMailbox(
     tenantId: string,
     input: ProvisionDidRequest
-  ): string {
+  ): string | null {
     if (input.mailboxId) {
       const mailbox = mailboxRepository.getById(input.mailboxId)
       const inTenant = mailboxRepository
@@ -117,13 +149,6 @@ export class DidProvisioningService {
       return input.mailboxId
     }
 
-    const mailbox = mailboxRepository.create({
-      name: input.mailboxName ?? `Line ${input.number}`,
-      number: null,
-      sipAccountRef: null,
-      greetingPromptId: null,
-      tenantId,
-    })
-    return mailbox.id
+    return null
   }
 }

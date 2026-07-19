@@ -19,7 +19,7 @@ import DeleteIcon from '@mui/icons-material/Delete'
 import KeyIcon from '@mui/icons-material/Key'
 import SaveIcon from '@mui/icons-material/Save'
 import { ApiKey } from '../../../shared/src/index.js'
-import { useAuth } from '../app/AuthContext'
+import { useAuth } from '../app/useAuth'
 import {
   changePassword,
   createApiKey,

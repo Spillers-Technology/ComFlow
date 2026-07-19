@@ -54,6 +54,16 @@ export const VerifyEmailRequestSchema = z.object({
   token: z.string().trim().min(1),
 })
 
+export const ResendVerificationRequestSchema = z.object({
+  email: z.string().trim().email(),
+})
+
+export const ResendVerificationResponseSchema = z.object({
+  // Always true, including for unknown/already-verified addresses, so this
+  // public endpoint cannot be used to enumerate accounts.
+  accepted: z.literal(true),
+})
+
 export const SsoProviderInfoSchema = z.object({
   id: z.enum(['oidc', 'saml']),
   label: z.string(),
@@ -83,6 +93,12 @@ export type User = z.infer<typeof UserSchema>
 export type RegisterRequest = z.infer<typeof RegisterRequestSchema>
 export type RegisterResponse = z.infer<typeof RegisterResponseSchema>
 export type VerifyEmailRequest = z.infer<typeof VerifyEmailRequestSchema>
+export type ResendVerificationRequest = z.infer<
+  typeof ResendVerificationRequestSchema
+>
+export type ResendVerificationResponse = z.infer<
+  typeof ResendVerificationResponseSchema
+>
 export type SsoProviderInfo = z.infer<typeof SsoProviderInfoSchema>
 export type AuthProvidersResponse = z.infer<typeof AuthProvidersResponseSchema>
 export type LoginRequest = z.infer<typeof LoginRequestSchema>

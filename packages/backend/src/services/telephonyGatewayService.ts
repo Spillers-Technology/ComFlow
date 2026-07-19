@@ -9,6 +9,7 @@ import {
 import { sipSettingsRepository } from '../repositories/sipSettingsRepository.js'
 import { AudioPromptService } from './audioPromptService.js'
 import { CallIngestionService } from './callIngestionService.js'
+import { ConcurrencyService } from './concurrencyService.js'
 
 /**
  * baresip ctrl command names. They map to the equivalent baresip menu keys and
@@ -26,6 +27,7 @@ const CMD = {
 } as const
 
 export interface OutboundCallRequest {
+  tenantId: string
   toNumber: string
   /** Pre-generated WAV played to the callee once they answer. */
   messageAudioPath: string | null
@@ -77,12 +79,19 @@ export class TelephonyGatewayService {
   // Tracks inbound calls between CALL_ESTABLISHED and CALL_CLOSED.
   private readonly inbound = new Map<
     string,
-    { fromNumber: string; toNumber: string | null; startedAt: number }
+    {
+      fromNumber: string
+      toNumber: string | null
+      tenantId: string
+      startedAt: number
+      timeout: NodeJS.Timeout | null
+    }
   >()
 
   constructor(
     private readonly callIngestionService: CallIngestionService,
-    private readonly audioPromptService: AudioPromptService
+    private readonly audioPromptService: AudioPromptService,
+    private readonly concurrencyService: ConcurrencyService = new ConcurrencyService()
   ) {
     this.client = new BaresipControlClient({
       host: config.telephony.baresipCtrlHost,
@@ -140,13 +149,41 @@ export class TelephonyGatewayService {
     const toNumber = event.accountaor
       ? extractNumberFromUri(event.accountaor)
       : null
-    this.inbound.set(callId, { fromNumber, toNumber, startedAt: Date.now() })
+    let tenantId: string
+    try {
+      tenantId = this.callIngestionService.assertCanAcceptInbound({ toNumber })
+        .tenantId
+    } catch (error) {
+      console.warn(`Rejected inbound call: ${(error as Error).message}`)
+      await this.client.command(CMD.hangup).catch(() => undefined)
+      return
+    }
+    if (!this.concurrencyService.tryBegin(tenantId, callId)) {
+      console.warn(`Rejected inbound call: tenant or trunk concurrency limit`)
+      await this.client.command(CMD.hangup).catch(() => undefined)
+      return
+    }
+    this.inbound.set(callId, {
+      fromNumber,
+      toNumber,
+      tenantId,
+      startedAt: Date.now(),
+      timeout: null,
+    })
 
     try {
       await this.client.command(CMD.accept)
     } catch (error) {
+      this.inbound.delete(callId)
+      this.concurrencyService.end(callId)
       console.warn(`Failed to accept inbound call: ${(error as Error).message}`)
       return
+    }
+    const tracked = this.inbound.get(callId)
+    if (tracked) {
+      tracked.timeout = setTimeout(() => {
+        void this.client.command(CMD.hangup).catch(() => undefined)
+      }, config.telephony.inboundMaxDurationSec * 1000)
     }
 
     // Greeting is best-effort; baresip's sndfile module records the call body.
@@ -175,6 +212,7 @@ export class TelephonyGatewayService {
     const tracked = this.inbound.get(callId)
     if (!tracked) return
     this.inbound.delete(callId)
+    if (tracked.timeout) clearTimeout(tracked.timeout)
 
     const telephonyCallId = `baresip-${callId}-${tracked.startedAt}`
 
@@ -202,6 +240,8 @@ export class TelephonyGatewayService {
       console.error(
         `Failed to ingest inbound voicemail: ${(error as Error).message}`
       )
+    } finally {
+      this.concurrencyService.end(callId)
     }
   }
 
@@ -245,56 +285,64 @@ export class TelephonyGatewayService {
     }
 
     const providerCallId = `baresip-out-${randomUUID()}`
+    const concurrencyKey = `outbound:${providerCallId}`
+    if (!this.concurrencyService.tryBegin(request.tenantId, concurrencyKey)) {
+      return { status: 'failed', providerCallId, recordingPath: null }
+    }
     const startedAt = Date.now()
     const outboundDialingDomain = getOutboundDialingDomain()
     const dialUri = outboundDialingDomain
       ? `sip:${request.toNumber}@${outboundDialingDomain}`
       : request.toNumber
 
-    const established = this.waitForOutboundEstablished(
-      config.telephony.outboundAnswerTimeoutSec * 1000
-    )
-
     try {
-      await this.client.command(CMD.dial, dialUri)
-    } catch {
-      return { status: 'failed', providerCallId, recordingPath: null }
-    }
+      const established = this.waitForOutboundEstablished(
+        config.telephony.outboundAnswerTimeoutSec * 1000
+      )
 
-    const answered = await established
-    if (!answered) {
+      try {
+        await this.client.command(CMD.dial, dialUri)
+      } catch {
+        return { status: 'failed', providerCallId, recordingPath: null }
+      }
+
+      const answered = await established
+      if (!answered) {
+        try {
+          await this.client.command(CMD.hangup)
+        } catch {
+          /* already gone */
+        }
+        return { status: 'no_answer', providerCallId, recordingPath: null }
+      }
+
+      // Play the message, then the single question. Best-effort; recording still
+      // captures whatever the far end says.
+      for (const audioPath of [
+        request.messageAudioPath,
+        request.questionAudioPath,
+      ]) {
+        if (!audioPath) continue
+        try {
+          await this.client.command(CMD.playFile, audioPath)
+        } catch {
+          /* playback unsupported on this build — continue to capture */
+        }
+      }
+
+      await delay(request.recordWindowMs)
+
       try {
         await this.client.command(CMD.hangup)
       } catch {
         /* already gone */
       }
-      return { status: 'no_answer', providerCallId, recordingPath: null }
+
+      const recordingPath = await this.findRecordingSince(startedAt)
+      return { status: 'completed', providerCallId, recordingPath }
+    } finally {
+      this.concurrencyService.end(concurrencyKey)
     }
-
-    // Play the message, then the single question. Best-effort; recording still
-    // captures whatever the far end says.
-    for (const audioPath of [
-      request.messageAudioPath,
-      request.questionAudioPath,
-    ]) {
-      if (!audioPath) continue
-      try {
-        await this.client.command(CMD.playFile, audioPath)
-      } catch {
-        /* playback unsupported on this build — continue to capture */
-      }
-    }
-
-    await delay(request.recordWindowMs)
-
-    try {
-      await this.client.command(CMD.hangup)
-    } catch {
-      /* already gone */
-    }
-
-    const recordingPath = await this.findRecordingSince(startedAt)
-    return { status: 'completed', providerCallId, recordingPath }
   }
 
   private waitForOutboundEstablished(timeoutMs: number): Promise<boolean> {

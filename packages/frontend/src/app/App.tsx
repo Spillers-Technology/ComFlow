@@ -1,20 +1,45 @@
 import { Box, CircularProgress, CssBaseline, ThemeProvider } from '@mui/material'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import {
+  BrowserRouter,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+} from 'react-router-dom'
 import { theme } from './theme'
-import { AuthProvider, useAuth } from './AuthContext'
+import { AuthProvider } from './AuthContext'
+import { useAuth } from './useAuth'
 import { AppShell } from '../components/AppShell'
 import { AccessPage } from '../pages/AccessPage'
 import { BillingUsagePage } from '../pages/BillingUsagePage'
 import { CallDetailPage } from '../pages/CallDetailPage'
 import { CallInboxPage } from '../pages/CallInboxPage'
 import { LoginPage } from '../pages/LoginPage'
+import { OnboardingPage } from '../pages/OnboardingPage'
 import { ProfilePage } from '../pages/ProfilePage'
+import { RegisterPage } from '../pages/RegisterPage'
 import { ScheduledCallsPage } from '../pages/ScheduledCallsPage'
 import { SettingsPage } from '../pages/SettingsPage'
 import { TenantsPage } from '../pages/TenantsPage'
+import { VerifyEmailPage } from '../pages/VerifyEmailPage'
+
+function ProtectedShell() {
+  return (
+    <AppShell>
+      <Outlet />
+    </AppShell>
+  )
+}
 
 function AppGate() {
-  const { user, authRequired, loading } = useAuth()
+  const {
+    user,
+    authRequired,
+    loading,
+    selfRegistrationEnabled,
+  } = useAuth()
+  const location = useLocation()
   // Open mode (auth not enforced) grants the synthetic admin full access, so
   // the admin UI should show there too — matching the backend's behavior.
   const isAdmin =
@@ -30,15 +55,50 @@ function AppGate() {
   }
 
   if (authRequired && !user) {
-    return <LoginPage />
+    const returnTo = `${location.pathname}${location.search}`
+    return (
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/register"
+          element={
+            selfRegistrationEnabled ? (
+              <RegisterPage />
+            ) : (
+              <Navigate to="/login" replace />
+            )
+          }
+        />
+        <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route
+          path="*"
+          element={
+            <Navigate
+              to="/login"
+              replace
+              state={{ from: returnTo }}
+            />
+          }
+        />
+      </Routes>
+    )
   }
 
   return (
-    <AppShell>
-      <Routes>
+    <Routes>
+      <Route path="/login" element={<Navigate to="/calls" replace />} />
+      <Route path="/register" element={<Navigate to="/onboarding" replace />} />
+      <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <Route element={<ProtectedShell />}>
         <Route path="/" element={<Navigate to="/calls" replace />} />
         <Route path="/calls" element={<CallInboxPage />} />
         <Route path="/calls/:id" element={<CallDetailPage />} />
+        <Route
+          path="/onboarding"
+          element={
+            isAdmin ? <OnboardingPage /> : <Navigate to="/calls" replace />
+          }
+        />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/billing" element={<BillingUsagePage />} />
         <Route path="/scheduled-calls" element={<ScheduledCallsPage />} />
@@ -60,8 +120,9 @@ function AppGate() {
             isAdmin ? <AccessPage /> : <Navigate to="/calls" replace />
           }
         />
-      </Routes>
-    </AppShell>
+        <Route path="*" element={<Navigate to="/calls" replace />} />
+      </Route>
+    </Routes>
   )
 }
 

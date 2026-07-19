@@ -18,6 +18,7 @@ import {
 } from '@mui/material'
 import { AvailableDid, ProvisionedDid } from '../../../shared/src/index.js'
 import { getDids, provisionDid, releaseDid, searchDids } from '../lib/api'
+import { ForwardingSetupCard } from './ForwardingSetupCard'
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
@@ -31,6 +32,7 @@ export function DidManagerCard({ onChange }: { onChange?: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [forwardingDid, setForwardingDid] = useState<ProvisionedDid | null>(null)
 
   async function loadDids() {
     const result = await getDids()
@@ -70,6 +72,7 @@ export function DidManagerCard({ onChange }: { onChange?: () => void }) {
       setAvailable(current => current.filter(d => d.number !== did.number))
       setSelected('')
       setMailboxName('')
+      setForwardingDid(did)
       await loadDids()
       onChange?.()
       setNotice(`Provisioned ${did.number}.`)
@@ -85,6 +88,7 @@ export function DidManagerCard({ onChange }: { onChange?: () => void }) {
     setNotice(null)
     try {
       await releaseDid(number)
+      setForwardingDid(current => (current?.number === number ? null : current))
       await loadDids()
       onChange?.()
       setNotice(`Released ${number}.`)
@@ -127,18 +131,35 @@ export function DidManagerCard({ onChange }: { onChange?: () => void }) {
                       <TableCell align="right">{money(did.monthlyCents)}</TableCell>
                       <TableCell align="right">{money(did.perMinuteCents)}</TableCell>
                       <TableCell align="right">
-                        <Button
-                          size="small"
-                          color="error"
-                          onClick={() => void handleRelease(did.number)}
+                        <Stack
+                          direction={{ xs: 'column', sm: 'row' }}
+                          spacing={1}
+                          justifyContent="flex-end"
                         >
-                          Release
-                        </Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            onClick={() => setForwardingDid(did)}
+                          >
+                            Set up forwarding
+                          </Button>
+                          <Button
+                            size="small"
+                            color="error"
+                            onClick={() => void handleRelease(did.number)}
+                          >
+                            Release
+                          </Button>
+                        </Stack>
                       </TableCell>
                     </TableRow>
                   ))}
               </TableBody>
             </Table>
+          )}
+
+          {forwardingDid && (
+            <ForwardingSetupCard didNumber={forwardingDid.number} />
           )}
 
           <Divider />

@@ -60,6 +60,9 @@ export const config = {
   promptsDir: path.join(dataDir, 'prompts'),
   databasePath: path.join(dataDir, 'comflow.db'),
   frontendOrigin: process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173',
+  // Required behind a trusted ingress so request.ip reflects the client for
+  // public-endpoint rate limits. Leave off when clients connect directly.
+  trustProxy: process.env.COMFLOW_TRUST_PROXY === 'true',
   // When set (the production image sets it), the backend also serves the built
   // frontend from this directory, so one container is the whole app on PORT.
   staticDir: readOptionalEnv('COMFLOW_STATIC_DIR'),
@@ -90,6 +93,11 @@ export const config = {
     outboundCaptureWindowSec: Number(
       process.env.COMFLOW_OUTBOUND_CAPTURE_WINDOW_SEC ?? 20
     ),
+    // Hard stop for an inbound voicemail so one caller cannot hold a paid SIP
+    // channel indefinitely after the wallet check at call start.
+    inboundMaxDurationSec: Number(
+      process.env.COMFLOW_INBOUND_MAX_DURATION_SEC ?? 180
+    ),
     // How often the scheduler checks for due outbound calls, in seconds.
     schedulerIntervalSec: Number(
       process.env.COMFLOW_SCHEDULER_INTERVAL_SEC ?? 15
@@ -115,13 +123,19 @@ export const config = {
   // used; otherwise a `fake` adapter backs dev/tests (no network, no signatures).
   billing: {
     provider: readOptionalEnv('COMFLOW_BILLING_PROVIDER'),
-    // Wallet balance is only enforced when real billing is in play (hosted
-    // mode). Self-host/dev (fake provider) never gates on balance.
+    // Real billing always enforces the wallet. Paid plans also enforce it when
+    // the fake provider is selected so hosted dry-runs exercise the same fraud
+    // boundary instead of silently provisioning at $0.
     enforced:
+      process.env.COMFLOW_BILLING_ENFORCED === 'true' ||
       readOptionalEnv('COMFLOW_BILLING_PROVIDER') === 'stripe' ||
       Boolean(readOptionalEnv('STRIPE_SECRET_KEY')),
     stripeSecretKey: readOptionalEnv('STRIPE_SECRET_KEY'),
     stripeWebhookSecret: readOptionalEnv('STRIPE_WEBHOOK_SECRET'),
+    // Bound the amount of provider spend a single disputed top-up can unlock.
+    // Hosted operators may lower this further; the service enforces it even if
+    // a caller bypasses the frontend's suggested amounts.
+    maxTopUpCents: Number(process.env.COMFLOW_MAX_TOPUP_CENTS ?? 10000),
     // Where Stripe Checkout returns the customer after pay/cancel.
     successUrl:
       readOptionalEnv('STRIPE_SUCCESS_URL') ??
@@ -227,11 +241,31 @@ export const config = {
   selfRegistration: {
     enabled: process.env.COMFLOW_SELF_REGISTRATION === 'true',
     plan: readOptionalEnv('COMFLOW_SELF_REGISTRATION_PLAN') ?? 'solo',
-    // Verification links ride the SMTP notification transport; when email
-    // notifications are off there is no way to deliver them, so accounts
-    // auto-verify (dev/dry-run). Set false to skip verification entirely.
-    requireEmailVerification:
-      process.env.COMFLOW_SELF_REGISTRATION_VERIFY !== 'false',
+    // Open signup always verifies ownership of the email address. Deployments
+    // that enable registration must also configure the SMTP transport.
+    verificationTtlHours: Number(
+      process.env.COMFLOW_EMAIL_VERIFICATION_TTL_HOURS ?? 24
+    ),
+    // The public solo plan has an explicit, finite risk envelope. These values
+    // are deliberately separate from operator-created tenant defaults.
+    planLimits: {
+      maxConcurrentCalls: Number(
+        process.env.COMFLOW_SELF_REGISTRATION_MAX_CONCURRENT ?? 2
+      ),
+      maxDids: Number(process.env.COMFLOW_SELF_REGISTRATION_MAX_DIDS ?? 1),
+      includedMinutes: Number(
+        process.env.COMFLOW_SELF_REGISTRATION_INCLUDED_MINUTES ?? 200
+      ),
+      markupBps: Number(
+        process.env.COMFLOW_SELF_REGISTRATION_MARKUP_BPS ?? 15000
+      ),
+    },
+    // A self-registered tenant may not unlock more provider spend than this
+    // without an operator changing its status/plan. Unlike a wallet-balance
+    // cap, lifetime settled credit remains bounded after usage is consumed.
+    maxLifetimeCreditCents: Number(
+      process.env.COMFLOW_SELF_REGISTRATION_MAX_LIFETIME_CREDIT_CENTS ?? 20000
+    ),
   },
   // The "primary" tenant every pre-tenancy row backfills onto, and the home of
   // the bootstrap admin + default mailbox. In self-host/open mode this is the

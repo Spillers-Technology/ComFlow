@@ -10,6 +10,7 @@ import { HttpError } from '../lib/errors.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
 import { hashPassword } from '../lib/password.js'
 import { slugify } from '../lib/slug.js'
+import { db } from '../db/client.js'
 import { requireOwner } from '../middleware/requireOwner.js'
 import { auditRepository } from '../repositories/auditRepository.js'
 import { tenantLimitsRepository } from '../repositories/tenantLimitsRepository.js'
@@ -41,13 +42,23 @@ export function createTenantsRouter() {
       if (tenantRepository.getBySlug(slug)) {
         throw new HttpError(409, 'A tenant with that slug already exists.')
       }
-      const tenant = tenantRepository.create({
-        name: input.name,
-        slug,
-        plan: input.plan,
-      })
-      // Materialize default limits so the new tenant is immediately usable.
-      tenantLimitsRepository.get(tenant.id)
+      const actor = response.locals.user as User
+      const tenant = db.transaction(() => {
+        const created = tenantRepository.create({
+          name: input.name,
+          slug,
+          plan: input.plan,
+        })
+        // Materialize default limits so the new tenant is immediately usable.
+        tenantLimitsRepository.get(created.id)
+        auditRepository.record({
+          actor: actor.id,
+          action: 'tenant.create',
+          tenantId: created.id,
+          detail: { plan: created.plan, via: 'tenants-api' },
+        })
+        return created
+      })()
       response.status(201).json({ tenant })
     })
   )

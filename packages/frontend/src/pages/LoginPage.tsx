@@ -10,10 +10,23 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { useAuth } from '../app/AuthContext'
+import {
+  Link as RouterLink,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom'
+import { useAuth } from '../app/useAuth'
 
 export function LoginPage() {
-  const { login, localEnabled, providers, ssoError } = useAuth()
+  const {
+    login,
+    localEnabled,
+    providers,
+    selfRegistrationEnabled,
+    ssoError,
+  } = useAuth()
+  const location = useLocation()
+  const navigate = useNavigate()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -25,6 +38,8 @@ export function LoginPage() {
     setError(null)
     try {
       await login(email.trim(), password)
+      const from = (location.state as { from?: string } | null)?.from
+      navigate(from && from !== '/login' ? from : '/calls', { replace: true })
     } catch (reason) {
       setError((reason as Error).message)
     } finally {
@@ -45,7 +60,7 @@ export function LoginPage() {
       <Card sx={{ width: '100%', maxWidth: 400 }}>
         <CardContent>
           <Stack spacing={2}>
-            <Typography variant="h4" fontWeight={700}>
+            <Typography component="h1" variant="h4" fontWeight={700}>
               ComFlow
             </Typography>
             <Typography color="text.secondary">
@@ -80,7 +95,9 @@ export function LoginPage() {
                   type="email"
                   value={email}
                   onChange={event => setEmail(event.target.value)}
+                  autoComplete="email"
                   autoFocus
+                  required
                   fullWidth
                 />
                 <TextField
@@ -88,6 +105,8 @@ export function LoginPage() {
                   type="password"
                   value={password}
                   onChange={event => setPassword(event.target.value)}
+                  autoComplete="current-password"
+                  required
                   fullWidth
                 />
                 <Button
@@ -98,6 +117,12 @@ export function LoginPage() {
                   {submitting ? 'Signing in…' : 'Sign in'}
                 </Button>
               </Stack>
+            )}
+
+            {selfRegistrationEnabled && (
+              <Button component={RouterLink} to="/register" variant="text">
+                New to ComFlow? Create an account
+              </Button>
             )}
 
             {!localEnabled && providers.length === 0 && (
