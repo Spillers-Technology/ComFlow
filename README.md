@@ -24,7 +24,8 @@ call-handling, use [agentvoiceresponse](https://github.com/agentvoiceresponse).)
 Run it two ways: **bring your own SIP trunk and self-host** for a single team
 (open or local-auth, nothing else required), or **run it as a multi-tenant
 service** for others — provision phone numbers on demand, meter usage, and bill
-each customer from a Stripe prepaid wallet behind a hard tenant boundary. See
+each customer on a monthly Stripe subscription with wallet-funded overage, behind
+a hard tenant boundary. See
 [Hosting it for others](#hosting-it-for-others-saas).
 
 More screenshots (call detail, scheduled outbound, DID provisioning, billing,
@@ -108,9 +109,11 @@ SIP source ──SIP/RTP──▶ baresip (SIP edge) ──ctrl_tcp──▶ Com
 - **Guided call forwarding**: after provisioning, customers choose missed-call
   or all-call forwarding and get carrier-specific dial codes, QR codes,
   tap-to-dial links, deactivation instructions, and a copy-to-dial fallback.
-- **Usage metering & prepaid wallet**: per-tenant metering of minutes, AI, and
-  DID rental with transparent carrier-vs-charged pricing; customers fund a Stripe
-  prepaid wallet that usage draws down. Per-tenant limits and trunk concurrency
+- **Banded subscriptions + prepaid wallet**: customers subscribe to a plan band
+  (Solo $9 / Pro $29 / Business $79) that sets their numbers, included minutes,
+  and concurrent calls; usage past the included minutes draws a prepaid Stripe
+  wallet at transparent carrier-vs-charged pricing. Plan changes and cancellation
+  go through Stripe's hosted billing portal. Per-tenant limits and trunk concurrency
   caps included.
 
 ## Running from source
@@ -200,7 +203,9 @@ Tenant-scoped: `GET /api/usage` (metered usage + transparent pricing),
 `GET /api/billing` (wallet). Owner-only: `/api/tenants*` (tenant/plan/limit
 management, seed org-admins, freeze/unfreeze, and `GET /api/tenants/:id/audit`).
 Open (machine-to-machine):
-`POST /api/webhooks/stripe` (signature-verified wallet credit).
+`POST /api/webhooks/stripe` (signature-verified wallet credit and subscription
+state). Outbound access is requested at `/api/outbound/request` and granted by an
+owner; two-factor enrollment lives under `/api/me/mfa`.
 
 MCP: `POST /api/mcp` (Streamable HTTP) requires `Authorization: Bearer cf_...`.
 Session tokens are intentionally not accepted for MCP. Tools mirror the UI:
@@ -264,7 +269,11 @@ All env vars are documented in [.env.example](.env.example). Highlights:
   `VOIPMS_SUBACCOUNT` (trunk the DIDs route to), `VOIPMS_DEFAULT_STATE`. Absent
   these, a `fake` provider is used. Override with `COMFLOW_SIP_TRUNK_PROVIDER`.
 - **Stripe billing**: `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
-  `STRIPE_{SUCCESS,CANCEL}_URL`, `COMFLOW_MAX_TOPUP_CENTS`. Stripe mode refuses
+  `STRIPE_{SUCCESS,CANCEL}_URL`, `COMFLOW_MAX_TOPUP_CENTS`, and one Price id per
+  band (`COMFLOW_STRIPE_PRICE_{SOLO,PRO,BUSINESS}`) — create the Products/Prices
+  once in the Stripe dashboard, since ids differ between test and live mode. A
+  restricted key needs Products, Prices, Subscriptions, and Billing Portal write
+  access on top of Customers and Checkout. Stripe mode refuses
   to start without a webhook secret. Absent Stripe credentials, a `fake` billing
   provider is used; non-free tenants remain wallet-gated so hosted dry-runs still
   test the fraud boundary. `COMFLOW_BILLING_ENFORCED=true` extends that gate to
@@ -277,8 +286,13 @@ All env vars are documented in [.env.example](.env.example). Highlights:
 ComFlow runs two ways: **bring your own trunk and self-host** (open or local-auth
 mode, single tenant — nothing below is required), or **run it as a service** for
 others. In hosted mode you can enable public signup so a customer verifies their
-email, funds a prepaid wallet, provisions a DID, and follows the guided forwarding
-step without operator-created credentials.
+email, picks a plan band, subscribes, provisions a DID, and follows the guided
+forwarding step without operator-created credentials.
+
+Outbound calling is **not** part of any band. New tenants have it off; they
+request it in-app with a stated use case and consent attestation, and an owner
+enables it after a call. Approved tenants are still bounded by per-day call and
+spend ceilings and a country allow-list (NANP by default).
 
 Self-registration does not turn fake providers into a phone service. Use the fake
 billing/SIP adapters for a local dry run; a public paid deployment still needs
