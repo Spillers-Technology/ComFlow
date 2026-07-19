@@ -5,6 +5,7 @@ import {
 } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
+import { requireVerifiedEmail } from '../middleware/requireVerifiedEmail.js'
 import { ScheduledCallService } from '../services/scheduledCallService.js'
 
 function paramId(value: unknown): string {
@@ -28,6 +29,7 @@ export function createScheduledCallsRouter(service: ScheduledCallService) {
 
   router.post(
     '/',
+    requireVerifiedEmail,
     asyncHandler((request, response) => {
       const user = response.locals.user as User
       const input = parseBody(CreateScheduledCallRequestSchema, request.body)

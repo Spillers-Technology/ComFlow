@@ -52,6 +52,9 @@ import {
   GetUsageResponseSchema,
   ProvisionDidRequest,
   ProvisionDidResponseSchema,
+  RegisterRequest,
+  RegisterResponseSchema,
+  ResendVerificationResponseSchema,
   SearchDidsResponseSchema,
   TenantLimitsResponseSchema,
   TenantResponseSchema,
@@ -456,6 +459,30 @@ export function login(payload: LoginRequest) {
     '/api/auth/login',
     { method: 'POST', body: JSON.stringify(payload) },
     LoginResponseSchema
+  )
+}
+
+export function register(payload: RegisterRequest) {
+  return request(
+    '/api/auth/register',
+    { method: 'POST', body: JSON.stringify(payload) },
+    RegisterResponseSchema
+  )
+}
+
+export function verifyEmail(token: string) {
+  return request(
+    '/api/auth/verify-email',
+    { method: 'POST', body: JSON.stringify({ token }) },
+    UserResponseSchema
+  )
+}
+
+export function resendVerification(email: string) {
+  return request(
+    '/api/auth/resend-verification',
+    { method: 'POST', body: JSON.stringify({ email }) },
+    ResendVerificationResponseSchema
   )
 }
 

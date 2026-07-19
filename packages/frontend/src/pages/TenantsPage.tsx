@@ -20,7 +20,7 @@ import {
   Typography,
 } from '@mui/material'
 import { Tenant, TenantLimits } from '../../../shared/src/index.js'
-import { useAuth } from '../app/AuthContext'
+import { useAuth } from '../app/useAuth'
 import {
   createTenant,
   createTenantUser,

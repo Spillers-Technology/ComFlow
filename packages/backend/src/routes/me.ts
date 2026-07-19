@@ -11,6 +11,7 @@ import { hashPassword, verifyPassword } from '../lib/password.js'
 import { userRepository } from '../repositories/userRepository.js'
 import { apiKeyService } from '../services/apiKeyService.js'
 import { toApiUser } from '../services/authService.js'
+import { RegistrationService } from '../services/registrationService.js'
 
 function requireCurrentRecord(user: User) {
   const record = userRepository.getById(user.id)
@@ -26,7 +27,7 @@ function requireParam(value: string | string[] | undefined, label: string) {
   return id
 }
 
-export function createMeRouter() {
+export function createMeRouter(registrationService: RegistrationService) {
   const router = Router()
 
   router.get(
@@ -38,26 +39,22 @@ export function createMeRouter() {
 
   router.patch(
     '/',
-    asyncHandler((request, response) => {
+    asyncHandler(async (request, response) => {
       const current = response.locals.user as User
       const existing = requireCurrentRecord(current)
       const input = parseBody(UpdateProfileSchema, request.body)
 
-      const patch: { displayName: string | null; email?: string } = {
-        displayName: input.displayName,
-      }
-
       if (existing.authProvider === 'local') {
-        const duplicate = userRepository.getByEmail(input.email)
-        if (duplicate && duplicate.id !== existing.id) {
-          throw new HttpError(409, 'A user with that email already exists.')
-        }
-        patch.email = input.email
+        const user = await registrationService.updateLocalProfile(existing, input)
+        response.json({ user })
+        return
       } else if (input.email.toLowerCase() !== existing.email.toLowerCase()) {
         throw new HttpError(400, 'Email can only be changed for local users.')
       }
 
-      const user = userRepository.updateProfile(existing.id, patch)
+      const user = userRepository.updateProfile(existing.id, {
+        displayName: input.displayName,
+      })
       response.json({ user: toApiUser(user!) })
     })
   )

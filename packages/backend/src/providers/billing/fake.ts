@@ -26,23 +26,35 @@ export class FakeBillingProvider implements BillingProvider {
     }
   }
 
-  parseWebhook(input: {
+  async parseWebhook(input: {
     rawBody: Buffer | string
     signature: string | undefined
-  }): PaymentEvent | null {
+  }): Promise<PaymentEvent | null> {
     void input.signature
     const body = JSON.parse(
       typeof input.rawBody === 'string' ? input.rawBody : input.rawBody.toString()
     ) as { type?: string; tenantId?: string; amountCents?: number; id?: string }
 
-    if (body.type !== 'payment_succeeded' || !body.tenantId || !body.amountCents) {
-      return null
+    if (!body.tenantId) return null
+
+    if (body.type === 'payment_succeeded' && body.amountCents) {
+      return {
+        id: body.id ?? randomUUID(),
+        type: 'payment_succeeded',
+        tenantId: body.tenantId,
+        amountCents: body.amountCents,
+      }
     }
-    return {
-      id: body.id ?? randomUUID(),
-      type: 'payment_succeeded',
-      tenantId: body.tenantId,
-      amountCents: body.amountCents,
+
+    if (body.type === 'payment_disputed') {
+      return {
+        id: body.id ?? randomUUID(),
+        type: 'payment_disputed',
+        tenantId: body.tenantId,
+        amountCents: body.amountCents ?? 0,
+      }
     }
+
+    return null
   }
 }

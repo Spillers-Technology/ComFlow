@@ -24,7 +24,7 @@ import {
   User,
   UserRole,
 } from '../../../shared/src/index.js'
-import { useAuth } from '../app/AuthContext'
+import { useAuth } from '../app/useAuth'
 import {
   createGroup,
   createUser,

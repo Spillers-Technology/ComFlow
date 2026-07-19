@@ -6,13 +6,26 @@
 export type CheckoutSession = { url: string }
 
 /** A normalized payment event parsed from a provider webhook. */
-export type PaymentEvent = {
-  // Provider event id, used for idempotency.
-  id: string
-  type: 'payment_succeeded'
-  tenantId: string
-  amountCents: number
-}
+export type PaymentEvent =
+  | {
+      // Provider event id, used for idempotency.
+      id: string
+      // Settled funds only — checkout sessions that completed unpaid never
+      // produce this event.
+      type: 'payment_succeeded'
+      tenantId: string
+      amountCents: number
+    }
+  | {
+      id: string
+      // A chargeback/dispute was opened; the tenant gets frozen. Dispute
+      // webhooks may only carry the provider customer id, so either identifier
+      // is allowed and the service resolves the tenant.
+      type: 'payment_disputed'
+      tenantId?: string
+      customerId?: string
+      amountCents: number
+    }
 
 export interface BillingProvider {
   readonly id: string
@@ -33,10 +46,12 @@ export interface BillingProvider {
 
   /**
    * Verify + parse a webhook into a normalized payment event, or null if it's a
-   * type we don't act on. Throws if the signature is invalid.
+   * type we don't act on. Throws if the signature is invalid. Async because
+   * some events (Stripe disputes) need a follow-up API call to resolve the
+   * customer.
    */
   parseWebhook(input: {
     rawBody: Buffer | string
     signature: string | undefined
-  }): PaymentEvent | null
+  }): Promise<PaymentEvent | null>
 }

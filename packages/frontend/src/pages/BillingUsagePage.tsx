@@ -18,8 +18,9 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import { UsageSummary, Wallet } from '../../../shared/src/index.js'
-import { useAuth } from '../app/AuthContext'
+import { useAuth } from '../app/useAuth'
 import { getUsage, getWallet, startTopUp } from '../lib/api'
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
@@ -35,8 +36,11 @@ const USAGE_LABELS: Record<string, string> = {
 
 export function BillingUsagePage() {
   const { user, authRequired } = useAuth()
+  const [searchParams] = useSearchParams()
   const isAdmin =
     !authRequired || user?.role === 'admin' || user?.role === 'owner'
+  const verified = user?.emailVerified !== false
+  const checkoutStatus = searchParams.get('status')
 
   const [wallet, setWallet] = useState<Wallet | null>(null)
   const [summary, setSummary] = useState<UsageSummary | null>(null)
@@ -93,6 +97,22 @@ export function BillingUsagePage() {
         </Box>
 
         {error && <Alert severity="error">{error}</Alert>}
+        {checkoutStatus === 'success' && (
+          <Alert
+            severity="success"
+            action={
+              <Button component={RouterLink} to="/onboarding" color="inherit">
+                Continue setup
+              </Button>
+            }
+          >
+            Payment submitted. Your wallet updates after the provider confirms
+            the settled funds.
+          </Alert>
+        )}
+        {checkoutStatus === 'cancel' && (
+          <Alert severity="info">Checkout was canceled; your wallet was not changed.</Alert>
+        )}
         {loading && <LinearProgress />}
 
         {wallet && (
@@ -115,27 +135,29 @@ export function BillingUsagePage() {
                 </Alert>
               )}
               {isAdmin && (
-                <Stack
-                  direction="row"
-                  spacing={2}
-                  alignItems="center"
-                  sx={{ mt: 3 }}
-                >
-                  <TextField
-                    label="Amount (USD)"
-                    size="small"
-                    type="number"
-                    value={amount}
-                    onChange={event => setAmount(event.target.value)}
-                    sx={{ width: 160 }}
-                  />
-                  <Button
-                    variant="contained"
-                    onClick={() => void handleTopUp()}
-                    disabled={toppingUp || Number(amount) < 5}
-                  >
-                    {toppingUp ? 'Redirecting…' : 'Add funds'}
-                  </Button>
+                <Stack spacing={2} sx={{ mt: 3 }}>
+                  {!verified && (
+                    <Alert severity="warning">
+                      Verify your email address before adding funds.
+                    </Alert>
+                  )}
+                  <Stack direction="row" spacing={2} alignItems="center">
+                    <TextField
+                      label="Amount (USD)"
+                      size="small"
+                      type="number"
+                      value={amount}
+                      onChange={event => setAmount(event.target.value)}
+                      sx={{ width: 160 }}
+                    />
+                    <Button
+                      variant="contained"
+                      onClick={() => void handleTopUp()}
+                      disabled={!verified || toppingUp || Number(amount) < 5}
+                    >
+                      {toppingUp ? 'Redirecting…' : 'Add funds'}
+                    </Button>
+                  </Stack>
                 </Stack>
               )}
             </CardContent>

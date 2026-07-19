@@ -10,9 +10,34 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+coverage
+.nyc_output
+.cache
 *.local
 .env
 .env.*
+
+# Local runtime state. SQLite WAL/SHM files can retain deleted rows, so keep the
+# entire database set out of both new commits and ad-hoc smoke-test folders.
+.smoke-data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+
+# Local credentials and package-manager auth. Commit only deliberately named
+# example files containing placeholders. `/env` is a bare-named local secrets
+# scratch file at the repo root; the .env patterns above do not cover it.
+/env
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
 packages/backend/data/*.db
 !*.example
 packages/backend/data/recordings/*

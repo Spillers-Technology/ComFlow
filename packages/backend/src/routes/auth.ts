@@ -1,14 +1,22 @@
 import { Router, urlencoded } from 'express'
-import { LoginRequestSchema } from '../../../shared/src/index.js'
+import {
+  LoginRequestSchema,
+  RegisterRequestSchema,
+  ResendVerificationRequestSchema,
+  VerifyEmailRequestSchema,
+} from '../../../shared/src/index.js'
 import { config } from '../config.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
 import { verifySessionToken } from '../lib/token.js'
+import { rateLimit } from '../middleware/rateLimit.js'
 import { AuthService } from '../services/authService.js'
+import { RegistrationService } from '../services/registrationService.js'
 import { SsoService } from '../services/ssoService.js'
 
 export function createAuthRouter(
   authService: AuthService,
-  ssoService: SsoService
+  ssoService: SsoService,
+  registrationService: RegistrationService
 ) {
   const router = Router()
 
@@ -16,6 +24,7 @@ export function createAuthRouter(
     return {
       localEnabled: config.auth.localEnabled,
       providers: ssoService.listProviderInfo(),
+      selfRegistrationEnabled: registrationService.enabled,
     }
   }
 
@@ -42,6 +51,42 @@ export function createAuthRouter(
       const input = parseBody(LoginRequestSchema, request.body)
       const result = await authService.login(input.email, input.password)
       response.json(result)
+    })
+  )
+
+  // Public self-service signup (hosted mode): new tenant + its org-admin in
+  // one call. Rate-limited per IP; the real fraud boundary is the wallet,
+  // plan caps, verification gate, and dispute freeze.
+  router.post(
+    '/register',
+    rateLimit({ windowMs: 15 * 60_000, max: 10 }),
+    asyncHandler(async (request, response) => {
+      const input = parseBody(RegisterRequestSchema, request.body)
+      const result = await registrationService.register(input)
+      response.status(201).json(result)
+    })
+  )
+
+  // Consumes the emailed verification token; unlocks paid actions.
+  router.post(
+    '/verify-email',
+    rateLimit({ windowMs: 15 * 60_000, max: 30 }),
+    asyncHandler((request, response) => {
+      const input = parseBody(VerifyEmailRequestSchema, request.body)
+      const user = registrationService.verifyEmail(input.token)
+      response.json({ user })
+    })
+  )
+
+  // Always returns the same response so callers cannot use it to discover
+  // whether an address has an account. Delivery is rate-limited per source IP.
+  router.post(
+    '/resend-verification',
+    rateLimit({ windowMs: 15 * 60_000, max: 5 }),
+    asyncHandler(async (request, response) => {
+      const input = parseBody(ResendVerificationRequestSchema, request.body)
+      await registrationService.resendVerification(input.email)
+      response.json({ accepted: true })
     })
   )
 

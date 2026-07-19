@@ -291,6 +291,72 @@ addColumnIfMissing('calls', 'email_notified_at', 'TEXT')
 addColumnIfMissing('calls', 'reviewed_by', 'TEXT')
 // Links a local user row to an external SSO identity (subject/nameID).
 addColumnIfMissing('users', 'external_id', 'TEXT')
+// Email verification (4.0 self-registration). Operator-created, SSO, and
+// bootstrap accounts are verified at creation; only self-registered accounts
+// start unverified, holding a token until the emailed link is clicked.
+addColumnIfMissing('users', 'email_verified_at', 'TEXT')
+addColumnIfMissing('users', 'email_verification_token', 'TEXT')
+addColumnIfMissing('users', 'email_verification_expires_at', 'TEXT')
+addColumnIfMissing('users', 'self_registered_at', 'TEXT')
+addColumnIfMissing(
+  'tenant_billing',
+  'pending_topup_cents',
+  'INTEGER NOT NULL DEFAULT 0'
+)
+addColumnIfMissing('tenant_billing', 'pending_topup_expires_at', 'TEXT')
+// Backfill pre-4.0 rows as verified. Unverified self-registered rows always
+// carry a token, so the token guard keeps them out of this backfill.
+db.prepare(`
+  UPDATE users SET email_verified_at = updated_at
+  WHERE email_verified_at IS NULL AND email_verification_token IS NULL
+`).run()
+// The application has always compared email addresses case-insensitively. Make
+// that invariant authoritative in SQLite so two app processes cannot race a
+// case-variant duplicate registration.
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower
+    ON users(lower(email));
+`)
+
+// Audit trail (4.0): privileged/automated actions — self-registration, DID
+// provision/release, wallet credits, tenant freeze/unfreeze — leave a row here
+// so hosted-mode changes are attributable after the fact.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    tenant_id TEXT,
+    detail TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_tenant_created
+    ON audit_log(tenant_id, created_at DESC);
+
+  -- Holds a DID slot while the provider order is in flight. Counting active
+  -- DIDs plus these reservations makes plan caps safe across async requests.
+  CREATE TABLE IF NOT EXISTS did_provisioning_reservations (
+    number TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_did_reservations_tenant
+    ON did_provisioning_reservations(tenant_id);
+
+  -- A dispute freeze and its owner notification are one durable workflow. The
+  -- freeze/audit/event marker and this row are committed together; SMTP retries
+  -- update this row without replaying the financial mutation.
+  CREATE TABLE IF NOT EXISTS billing_alert_outbox (
+    event_id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    tenant_name TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    sent_at TEXT
+  );
+`)
 
 // Multi-tenancy (3.0): every customer-owned table gets a tenant_id. Added as a
 // nullable column first so existing databases migrate cleanly, then backfilled

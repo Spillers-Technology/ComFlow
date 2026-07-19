@@ -53,13 +53,24 @@ async function resetDb() {
     DELETE FROM engine_settings;
     DELETE FROM engine_secret_overrides;
     DELETE FROM sip_settings;
+    DELETE FROM scheduled_calls;
+    DELETE FROM audio_prompts;
     DELETE FROM group_members;
     DELETE FROM group_mailboxes;
     DELETE FROM sso_group_mappings;
     DELETE FROM sso_login_states;
     DELETE FROM groups;
+    DELETE FROM did_provisioning_reservations;
+    DELETE FROM provisioned_dids;
+    DELETE FROM usage_events;
+    DELETE FROM billing_alert_outbox;
+    DELETE FROM billing_events;
+    DELETE FROM tenant_billing;
+    DELETE FROM audit_log;
+    DELETE FROM tenant_limits;
     DELETE FROM users;
     DELETE FROM mailboxes;
+    DELETE FROM tenants;
   `)
   fs.rmSync(process.env.BARESIP_ACCOUNTS_PATH!, { force: true })
 }
@@ -67,7 +78,9 @@ async function resetDb() {
 async function withServer<T>(run: (baseUrl: string) => Promise<T>) {
   const { createApp } = await getModules()
   const app = createApp()
-  const server = app.listen(0)
+  // Tests never need LAN exposure. Binding loopback explicitly also prevents a
+  // permissive host firewall from publishing the ephemeral integration server.
+  const server = app.listen(0, '127.0.0.1')
   await once(server, 'listening')
   const address = server.address()
   const port =
@@ -90,12 +103,15 @@ async function requestJson(
   pathname: string,
   init: RequestInit = {}
 ): Promise<{ response: Response; body: Record<string, unknown> | null }> {
+  // Spread init first: otherwise its `headers` replaces the merged object and
+  // callers passing an Authorization header lose Content-Type, leaving the
+  // body unparsed by express.json().
   const response = await fetch(`${baseUrl}${pathname}`, {
+    ...init,
     headers: {
       'Content-Type': 'application/json',
       ...(init.headers ?? {}),
     },
-    ...init,
   })
   const text = await response.text()
   return {
@@ -835,8 +851,8 @@ async function main() {
       tenantId,
       amountCents: 5000,
     })
-    billing.handleWebhook(event, undefined)
-    billing.handleWebhook(event, undefined) // replay must not double-credit
+    await billing.handleWebhook(event, undefined)
+    await billing.handleWebhook(event, undefined) // replay must not double-credit
     assert.equal(billing.wallet(tenantId).creditCents, 5000)
 
     // balance is always credit minus billed usage.
@@ -850,9 +866,292 @@ async function main() {
     assert.equal(after.balanceCents, 5000 - after.billedCents)
 
     // A bad webhook body is ignored, not credited.
-    billing.handleWebhook(JSON.stringify({ type: 'noise' }), undefined)
+    await billing.handleWebhook(JSON.stringify({ type: 'noise' }), undefined)
     assert.equal(billing.wallet(tenantId).creditCents, 5000)
   })
+
+  await runTest(
+    'self-registration is atomic and leaves no tenant when an audit write fails',
+    async () => {
+      const { db } = await getModules()
+      const { config } = await import('./config.js')
+      const { RegistrationService } = await import(
+        './services/registrationService.js'
+      )
+
+      const previous = {
+        enabled: config.selfRegistration.enabled,
+        required: config.auth.required,
+        localEnabled: config.auth.localEnabled,
+        emailEnabled: config.email.notificationsEnabled,
+      }
+      config.selfRegistration.enabled = true
+
+      const email = {
+        async sendEmailVerification() {
+          return true
+        },
+      }
+      const service = new RegistrationService(email)
+      config.auth.required = false
+      assert.throws(() => service.assertConfiguration(), /AUTH_REQUIRED/)
+      config.auth.required = true
+      config.auth.localEnabled = false
+      assert.throws(() => service.assertConfiguration(), /LOCAL_ENABLED/)
+      config.auth.localEnabled = true
+      config.email.notificationsEnabled = false
+      assert.throws(() => service.assertConfiguration(), /EMAIL_NOTIFICATIONS/)
+      config.email.notificationsEnabled = true
+      service.assertConfiguration()
+      db.exec(`
+        CREATE TEMP TRIGGER fail_self_registration_audit
+        BEFORE INSERT ON audit_log
+        WHEN NEW.action = 'tenant.self_register'
+        BEGIN
+          SELECT RAISE(FAIL, 'forced audit failure');
+        END;
+      `)
+
+      try {
+        await assert.rejects(
+          () =>
+            service.register({
+              email: 'rollback@example.com',
+              password: 'correct-horse-battery-staple',
+              organizationName: 'Rollback Co',
+            }),
+          /forced audit failure/
+        )
+        const tenantCount = db
+          .prepare('SELECT COUNT(*) AS count FROM tenants')
+          .get() as { count: number }
+        const userCount = db
+          .prepare('SELECT COUNT(*) AS count FROM users')
+          .get() as { count: number }
+        assert.equal(tenantCount.count, 0)
+        assert.equal(userCount.count, 0)
+      } finally {
+        db.exec('DROP TRIGGER IF EXISTS fail_self_registration_audit')
+        config.selfRegistration.enabled = previous.enabled
+        config.auth.required = previous.required
+        config.auth.localEnabled = previous.localEnabled
+        config.email.notificationsEnabled = previous.emailEnabled
+      }
+    }
+  )
+
+  await runTest(
+    'hostile signup stays gated until verified and funded, then caps and disputes freeze it',
+    async () => {
+      const { db } = await getModules()
+      const { config } = await import('./config.js')
+      const { RegistrationService } = await import(
+        './services/registrationService.js'
+      )
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import(
+        './providers/billing/fake.js'
+      )
+      const { tenantLimitsRepository } = await import(
+        './repositories/tenantLimitsRepository.js'
+      )
+      const { tenantRepository } = await import(
+        './repositories/tenantRepository.js'
+      )
+      const { auditRepository } = await import(
+        './repositories/auditRepository.js'
+      )
+      const { userRepository } = await import(
+        './repositories/userRepository.js'
+      )
+      const { billingAlertRepository } = await import(
+        './repositories/billingAlertRepository.js'
+      )
+
+      const previous = {
+        enabled: config.selfRegistration.enabled,
+        required: config.auth.required,
+        localEnabled: config.auth.localEnabled,
+        emailEnabled: config.email.notificationsEnabled,
+        emailTo: [...config.email.to],
+        defaultMaxDids: config.defaultTenantLimits.maxDids,
+      }
+      config.selfRegistration.enabled = true
+      config.auth.required = true
+      config.auth.localEnabled = true
+      config.email.notificationsEnabled = true
+      config.email.to = ['owner@example.com']
+      config.defaultTenantLimits.maxDids = 99
+
+      const delivered = {
+        verifications: [] as Array<{ email: string; token: string }>,
+        freezes: [] as Array<{ tenantId: string; reason: string }>,
+        async sendEmailVerification(email: string, token: string) {
+          this.verifications.push({ email, token })
+          return true
+        },
+        async sendTenantFrozenAlert(input: {
+          tenantName: string
+          tenantId: string
+          reason: string
+        }) {
+          void input.tenantName
+          this.freezes.push({ tenantId: input.tenantId, reason: input.reason })
+          return true
+        },
+      }
+
+      try {
+        const registration = new RegistrationService(delivered)
+        const registered = await registration.register({
+          email: 'hostile@example.com',
+          password: 'correct-horse-battery-staple',
+          organizationName: 'Hostile Dry Run',
+        })
+        assert.equal(registered.user.emailVerified, false)
+        assert.equal(registered.verificationRequired, true)
+        assert.equal(delivered.verifications.length, 1)
+        const storedToken = db
+          .prepare(
+            'SELECT email_verification_token AS token FROM users WHERE id = ?'
+          )
+          .get(registered.user.id) as { token: string }
+        assert.notEqual(storedToken.token, delivered.verifications[0]!.token)
+        assert.equal(storedToken.token.length, 64)
+
+        const limits = tenantLimitsRepository.get(registered.tenant.id)
+        assert.equal(limits.maxDids, 1)
+        assert.equal(limits.maxConcurrentCalls, 2)
+
+        const authorization = {
+          Authorization: `Bearer ${registered.token}`,
+        }
+        await withServer(async baseUrl => {
+          const unverified = await requestJson(baseUrl, '/api/dids', {
+            method: 'POST',
+            headers: authorization,
+            body: JSON.stringify({ number: '+15550102000' }),
+          })
+          assert.equal(unverified.response.status, 403)
+          assert.match(String(unverified.body?.error), /Verify your email/i)
+
+          await registration.resendVerification('hostile@example.com')
+          assert.equal(delivered.verifications.length, 2)
+          assert.throws(
+            () => registration.verifyEmail(delivered.verifications[0]!.token),
+            /Invalid or expired/
+          )
+          const verified = registration.verifyEmail(
+            delivered.verifications[1]!.token
+          )
+          assert.equal(verified.emailVerified, true)
+
+          const unfunded = await requestJson(baseUrl, '/api/dids', {
+            method: 'POST',
+            headers: authorization,
+            body: JSON.stringify({ number: '+15550102000' }),
+          })
+          assert.equal(unfunded.response.status, 402)
+
+          const billing = new BillingService(
+            new FakeBillingProvider(),
+            delivered
+          )
+          await assert.rejects(
+            () => billing.startTopUp(registered.tenant.id, 10100),
+            /limited to \$100\.00/
+          )
+          await billing.startTopUp(registered.tenant.id, 10000)
+          await billing.startTopUp(registered.tenant.id, 10000)
+          await billing.handleWebhook(
+            JSON.stringify({
+              id: 'evt-hostile-funded-1',
+              type: 'payment_succeeded',
+              tenantId: registered.tenant.id,
+              amountCents: 10000,
+            }),
+            undefined
+          )
+          await billing.handleWebhook(
+            JSON.stringify({
+              id: 'evt-hostile-funded-2',
+              type: 'payment_succeeded',
+              tenantId: registered.tenant.id,
+              amountCents: 10000,
+            }),
+            undefined
+          )
+          await assert.rejects(
+            () => billing.startTopUp(registered.tenant.id, 500),
+            /self-service funding limit/
+          )
+
+          const provisioned = await requestJson(baseUrl, '/api/dids', {
+            method: 'POST',
+            headers: authorization,
+            body: JSON.stringify({ number: '+15550102000' }),
+          })
+          assert.equal(provisioned.response.status, 201)
+          const capped = await requestJson(baseUrl, '/api/dids', {
+            method: 'POST',
+            headers: authorization,
+            body: JSON.stringify({ number: '+15550102001' }),
+          })
+          assert.equal(capped.response.status, 403)
+          assert.match(String(capped.body?.error), /DID limit reached/)
+
+          const changed = await registration.updateLocalProfile(
+            userRepository.getById(registered.user.id)!,
+            {
+              displayName: 'Hostile Dry Run',
+              email: 'hostile-new@example.com',
+            }
+          )
+          assert.equal(changed.emailVerified, false)
+          const blockedAfterEmailChange = await requestJson(
+            baseUrl,
+            '/api/billing/topup',
+            {
+              method: 'POST',
+              headers: authorization,
+              body: JSON.stringify({ amountCents: 500 }),
+            }
+          )
+          assert.equal(blockedAfterEmailChange.response.status, 403)
+          registration.verifyEmail(delivered.verifications.at(-1)!.token)
+
+          await billing.handleWebhook(
+            JSON.stringify({
+              id: 'evt-hostile-dispute',
+              type: 'payment_disputed',
+              tenantId: registered.tenant.id,
+              amountCents: 10000,
+            }),
+            undefined
+          )
+        })
+
+        assert.equal(
+          tenantRepository.getById(registered.tenant.id)?.status,
+          'suspended'
+        )
+        assert.equal(delivered.freezes.length, 1)
+        assert.ok(billingAlertRepository.get('evt-hostile-dispute')?.sentAt)
+        assert.ok(
+          auditRepository
+            .listByTenant(registered.tenant.id)
+            .some(entry => entry.action === 'tenant.freeze')
+        )
+      } finally {
+        config.selfRegistration.enabled = previous.enabled
+        config.auth.required = previous.required
+        config.auth.localEnabled = previous.localEnabled
+        config.email.notificationsEnabled = previous.emailEnabled
+        config.email.to = previous.emailTo
+        config.defaultTenantLimits.maxDids = previous.defaultMaxDids
+      }
+    }
+  )
 
   await runTest('requireAdmin blocks non-admins', async () => {
     const { requireAdmin } = await import('./middleware/requireAdmin.js')

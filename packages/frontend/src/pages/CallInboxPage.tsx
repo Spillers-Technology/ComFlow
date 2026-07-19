@@ -15,7 +15,7 @@ import {
 } from '@mui/material'
 import RefreshIcon from '@mui/icons-material/Refresh'
 import { CallIntentSchema, CallListItem, CallStatusSchema } from '../../../shared/src/index.js'
-import { useAuth } from '../app/AuthContext'
+import { useAuth } from '../app/useAuth'
 import { CallList } from '../components/CallList'
 import { getCalls, getMailboxes } from '../lib/api'
 

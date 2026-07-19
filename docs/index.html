@@ -4,12 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ComFlow — SIP voicemail, transcribed and triaged</title>
-  <meta name="description" content="ComFlow receives voicemails over SIP, transcribes and structures them, and gives your team a golden review inbox. Bring your own trunk and self-host, or get a hosted account with a DID to forward your calls to. Scheduled outbound calling included." />
+  <meta name="description" content="ComFlow receives voicemails over SIP, transcribes and structures them, and gives teams a focused review inbox. Self-host the current release or follow development of the verified hosted-signup flow." />
   <meta property="og:title" content="ComFlow — SIP voicemail, transcribed and triaged" />
-  <meta property="og:description" content="Voicemail regulator with current app screenshots: golden review inbox, call detail with transcript and AnchorDesk sync, scheduled outbound, DID provisioning, prepaid billing, and the owner tenants dashboard." />
+  <meta property="og:description" content="SIP voicemail capture, transcription, structured triage, scheduled outbound calls, tenant-isolated hosting, DID provisioning, and prepaid usage controls." />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://spillerstech.us/ComFlow/" />
-  <meta property="og:image" content="https://spillerstech.us/ComFlow/assets/screenshots/comflow-inbox.jpg" />
+  <meta property="og:url" content="https://spillers-technology.github.io/ComFlow/" />
+  <meta property="og:image" content="https://spillers-technology.github.io/ComFlow/assets/screenshots/comflow-inbox.jpg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -905,7 +905,7 @@
 
     .footer-links a:hover { color: var(--text); }
 
-    .claude-badge {
+    .product-badge {
       display: inline-flex;
       align-items: center;
       gap: 6px;
@@ -917,7 +917,7 @@
       padding: 5px 12px;
     }
 
-    .claude-dot {
+    .product-dot {
       width: 7px;
       height: 7px;
       border-radius: 50%;
@@ -1000,33 +1000,6 @@
     }
 </style>
 <link rel="stylesheet" href="assets/lightbox.css" />
-<!-- OpenReplay Tracking Code (replay.spillerstech.us) -->
-<script>
-  var initOpts = {
-    projectKey: "vQsdaVKqB3x2jUBKW4xd",
-    ingestPoint: "https://replay.spillerstech.us/ingest",
-    defaultInputMode: 0,
-    obscureTextNumbers: false,
-    obscureTextEmails: false,
-  };
-  var startOpts = { userID: "" };
-  (function(A,s,a,y,e,r){
-    r=window.OpenReplay=[e,r,y,[s-1, e]];
-    s=document.createElement('script');s.src=A;s.async=!a;
-    document.getElementsByTagName('head')[0].appendChild(s);
-    r.start=function(v){r.push([0])};
-    r.stop=function(v){r.push([1])};
-    r.setUserID=function(id){r.push([2,id])};
-    r.setUserAnonymousID=function(id){r.push([3,id])};
-    r.setMetadata=function(k,v){r.push([4,k,v])};
-    r.event=function(k,p,i){r.push([5,k,p,i])};
-    r.issue=function(k,p){r.push([6,k,p])};
-    r.isActive=function(){return false};
-    r.getSessionToken=function(){};
-  })("//static.openreplay.com/18.0.17/openreplay-assist.js",1,0,initOpts,startOpts);
-  OpenReplay.start();
-  OpenReplay.setMetadata("project", "ComFlow");
-</script>
 </head>
 <body>
 
@@ -1038,9 +1011,9 @@
       <a href="#features">Features</a>
       <a href="#how-it-works">How It Works</a>
       <a href="#screenshots">Screenshots</a>
-      <a href="#roadmap">Roadmap</a>
-      <a href="#access">Get Access</a>
-      <a href="https://spillerstech.us/">Spillers Tech</a>
+      <a href="#roadmap">Release status</a>
+      <a href="#access">Install</a>
+      <a href="https://com.spillerstech.us" target="_blank" rel="noopener">Hosted app ↗</a>
       <a href="https://github.com/Spillers-Technology/ComFlow" target="_blank" rel="noopener">GitHub ↗</a>
     </div>
   </div>
@@ -1050,12 +1023,13 @@
 <section class="section hero container">
   <div class="hero-copy">
     <div class="hero-eyebrow">
-      <span class="pill pill-live">⚡ v3.0.0 — multi-tenant + hosted accounts</span>
+      <span class="pill pill-live">Current release · v4.0.0</span>
+      <span class="pill pill-soon">Hosted signup · opening once billing is live</span>
     </div>
     <h1>Voicemail,<br><span class="glow-text">regulated.</span></h1>
-    <p class="hero-sub">ComFlow answers your calls over SIP, records the voicemail, transcribes and structures it, and gives your team a golden review inbox — plus tight scheduled outbound calling. <strong>Bring your own trunk and self-host</strong>, or <strong>email for a hosted account</strong> with a DID to forward your calls to. Not a receptionist — a voicemail regulator.</p>
+    <p class="hero-sub">ComFlow answers calls over SIP, records voicemail, transcribes and structures it, and gives your team a focused review inbox — plus tightly scoped scheduled outbound calling. <strong>Bring your own trunk and self-host the current release</strong>, or follow the hosted flow as verified signup, prepaid funding, DID provisioning, and guided call forwarding move toward release.</p>
     <div class="hero-actions">
-      <a href="#access" class="btn btn-primary">Get Access →</a>
+      <a href="#access" class="btn btn-primary">Install ComFlow →</a>
       <a href="https://github.com/Spillers-Technology/ComFlow" target="_blank" rel="noopener" class="btn btn-ghost">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
         View on GitHub
@@ -1221,9 +1195,9 @@
       <div class="bento-card card-hosted">
         <div class="bento-title">
           Run it as a service
-          <span class="pill pill-live" style="font-size:0.65rem; padding: 3px 9px;">New in 3.0</span>
+          <span class="pill pill-live" style="font-size:0.65rem; padding: 3px 9px;">New in 4.0</span>
         </div>
-        <div class="bento-desc">One VoIP.ms account and one set of AI keys, many isolated customers. ComFlow 3.0 turns the self-hosted app into a multi-tenant platform — provision numbers, meter usage, and bill from a prepaid wallet, all behind a hard tenant boundary.</div>
+        <div class="bento-desc">One SIP-provider account and one set of AI keys, many isolated customers. ComFlow 4.0 adds self-service onboarding on top of the multi-tenant platform: a customer signs up, verifies their email, funds a wallet, provisions a number, and is walked through carrier call forwarding — without an operator running scripts. Paid actions stay gated on settled funds, plan caps, and a chargeback freeze.</div>
         <div class="hosted-grid">
           <div class="hosted-feat">
             <div class="hf-title">🏢 Multi-tenant isolation</div>
@@ -1237,18 +1211,22 @@
             <div class="hf-title">💳 Metering + prepaid wallet</div>
             <div class="hf-desc">Per-tenant metering of minutes, AI, and DID rental with transparent carrier-vs-charged pricing. Customers fund a Stripe wallet that usage draws down, with per-tenant limits and trunk caps.</div>
           </div>
+          <div class="hosted-feat">
+            <div class="hf-title">🧭 Guided onboarding <span class="pill pill-soon" style="font-size:0.6rem; padding: 2px 8px;">In development</span></div>
+            <div class="hf-desc">Email verification, bounded prepaid funding, a single-plan DID flow, and carrier-specific forwarding instructions with QR, tap-to-dial, copy, and deactivation fallbacks.</div>
+          </div>
         </div>
       </div>
 
       <!-- Available NOW -->
       <div class="bento-card card-now">
         <div>
-          <span class="pill pill-live" style="margin-bottom: 14px; display: inline-flex;">⚡ Shipping today · v3.0.0</span>
+          <span class="pill pill-live" style="margin-bottom: 14px; display: inline-flex;">⚡ Shipping today · v4.0.0</span>
           <div class="now-headline">Self-host it,<br><span class="glow-text">or host it for others.</span></div>
         </div>
         <div class="now-desc">The whole loop is live: SIP capture → transcribe → extract → golden review inbox → AnchorDesk. Bring your own trunk and run it on your hardware, or stand it up as a multi-tenant service with DIDs, metering, and a prepaid wallet.</div>
         <div>
-          <a href="#access" class="btn btn-primary" style="white-space:nowrap;">Get Access →</a>
+          <a href="#access" class="btn btn-primary" style="white-space:nowrap;">Install v4.0.0 →</a>
         </div>
       </div>
     </div>
@@ -1350,14 +1328,14 @@
   </div>
 </section>
 
-<!-- ── Roadmap ──────────────────────────────────────────────── -->
+<!-- ── Release status ───────────────────────────────────────── -->
 <section class="section" id="roadmap">
   <div class="container">
     <div class="roadmap-grid">
       <div class="roadmap-label-block">
-        <div class="section-label">Roadmap</div>
-        <div class="roadmap-big"><span class="glow-text">Where we're</span><br>going.</div>
-        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">The whole voicemail loop is live today, and 3.0 turns it into a hosted, multi-tenant platform — DIDs, metering, a prepaid wallet, and an owner dashboard included. What's left is automating the front door: self-serve signup, without ever drifting out of ComFlow's lane.</p>
+        <div class="section-label">Release status</div>
+        <div class="roadmap-big"><span class="glow-text">Live now.</span><br>Next up.</div>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">v4.0.0 ships self-service onboarding on top of the multi-tenant platform: public signup, email verification, guided carrier call forwarding, and the fraud controls that make open signup survivable — settled-funds gating, per-tenant plan caps, chargeback freeze, and an audit trail. Items marked building are not claims about the current release.</p>
       </div>
 
       <ul class="roadmap-list">
@@ -1484,10 +1462,18 @@
         <li class="roadmap-item">
           <span class="roadmap-icon">📝</span>
           <div class="roadmap-text">
-            Self-serve signup
-            <small>Hosted registration and automatic tenant + account creation, replacing the manual request</small>
+            Verified self-serve signup
+            <small>Email ownership, automatic tenant/account creation, prepaid funding, finite limits, and abuse controls</small>
           </div>
-          <span class="status-badge status-planned">Planned</span>
+          <span class="status-badge status-building">Building</span>
+        </li>
+        <li class="roadmap-item">
+          <span class="roadmap-icon">📱</span>
+          <div class="roadmap-text">
+            Guided call forwarding
+            <small>Carrier-aware activation and deactivation codes with QR, tap-to-dial, copy, and manual fallbacks</small>
+          </div>
+          <span class="status-badge status-building">Building</span>
         </li>
         <li class="roadmap-item">
           <span class="roadmap-icon">📊</span>
@@ -1502,20 +1488,20 @@
   </div>
 </section>
 
-<!-- ── Access ───────────────────────────────────────────────── -->
+<!-- ── Install ──────────────────────────────────────────────── -->
 <section class="callout-section" id="access">
   <div class="container">
     <div class="callout-card">
       <div class="callout-phone">📨</div>
       <div class="callout-text">
-        <h3>Want in? <span class="glow-text">Pre-register.</span></h3>
-        <p>ComFlow is hosted at <strong>com.spillerstech.us</strong> — an isolated tenant, a DID to forward your calls to, and a Stripe prepaid wallet that usage draws down. Self-serve signup is on the way; for now, send the registration template to <a href="mailto:support@spillerstech.us?subject=ComFlow%20registration%20request&amp;body=COMFLOW_ACCESS_REQUEST%0A%0AName%3A%0AAccount%20email%3A%0AOrganization%3A%0ACallback%20number%3A%0ABilling%20contact%20email%3A%0AUse%20case%3A%0APreferred%20start%20date%3A%0A%0ANotes%3A" style="color: var(--accent-2); text-decoration: underline;">support@spillerstech.us</a> and we'll provision the tenant. That same structured request is what the automated signup flow will consume later.</p>
+        <h3>Self-host now. <span class="glow-text">Hosted signup next.</span></h3>
+        <p>ComFlow v4.0.0 is available today as an open-source container, and self-hosters can switch signup on with a single environment variable. The hosted app at <a href="https://com.spillerstech.us" target="_blank" rel="noopener" style="color: var(--accent-2); text-decoration: underline;">com.spillerstech.us</a> opens public registration once it is running 4.0.0 with live billing configured.</p>
       </div>
-      <a href="mailto:support@spillerstech.us?subject=ComFlow%20registration%20request&amp;body=COMFLOW_ACCESS_REQUEST%0A%0AName%3A%0AAccount%20email%3A%0AOrganization%3A%0ACallback%20number%3A%0ABilling%20contact%20email%3A%0AUse%20case%3A%0APreferred%20start%20date%3A%0A%0ANotes%3A" class="btn btn-primary" style="white-space:nowrap; align-self: center;">Send signup request →</a>
+      <a href="https://github.com/Spillers-Technology/ComFlow#get-it" target="_blank" rel="noopener" class="btn btn-primary" style="white-space:nowrap; align-self: center;">Install ComFlow →</a>
     </div>
     <p style="text-align:center; color: var(--text-muted); font-size: 0.85rem; margin-top: 24px; line-height: 1.7;">
       Rather run your own? It's open source and ships as a single container:
-      <code style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 0.82rem;">docker pull ghcr.io/spillers-technology/comflow:latest</code>
+      <code style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 0.82rem;">docker pull ghcr.io/spillers-technology/comflow:4.0.0</code>
       · <a href="https://github.com/Spillers-Technology/ComFlow" target="_blank" rel="noopener" style="color: var(--accent-2);">self-host guide on GitHub ↗</a>
     </p>
   </div>
@@ -1528,14 +1514,14 @@
     <div class="footer-links">
       <a href="https://github.com/Spillers-Technology/ComFlow" target="_blank" rel="noopener">GitHub</a>
       <a href="#features">Features</a>
-      <a href="#roadmap">Roadmap</a>
-      <a href="#access">Get Access</a>
+      <a href="#roadmap">Release status</a>
+      <a href="#access">Install</a>
+      <a href="https://com.spillerstech.us" target="_blank" rel="noopener">Hosted app</a>
       <a href="mailto:support@spillerstech.us">support@spillerstech.us</a>
-      <a href="https://spillerstech.us/">spillerstech.us</a>
     </div>
-    <div class="claude-badge">
-      <div class="claude-dot"></div>
-      The voicemail regulator · a <a href="https://spillerstech.us/" style="color: inherit;">Spillers Technology</a> product
+    <div class="product-badge">
+      <div class="product-dot"></div>
+      The voicemail regulator · <a href="https://github.com/Spillers-Technology" target="_blank" rel="noopener" style="color: inherit;">Spillers Technology</a>
     </div>
   </div>
 </footer>

@@ -90,4 +90,54 @@ export class EmailNotificationService {
 
     return true
   }
+
+  /** Verification link for a self-registered account. Sent to the new user. */
+  async sendEmailVerification(email: string, token: string): Promise<boolean> {
+    if (!config.email.notificationsEnabled) return false
+
+    const base = config.email.publicUrl.replace(/\/$/, '')
+    const link = `${base}/verify-email?token=${encodeURIComponent(token)}`
+    await this.transport.sendMail({
+      from: config.email.from,
+      to: email,
+      subject: '[ComFlow] Verify your email address',
+      text: [
+        'Welcome to ComFlow.',
+        '',
+        'Confirm your email address to unlock billing and phone-number',
+        'provisioning on your new account:',
+        '',
+        link,
+        '',
+        'If you did not create this account, ignore this message.',
+      ].join('\n'),
+    })
+    return true
+  }
+
+  /** Operator alert: a tenant was automatically frozen (e.g. chargeback). */
+  async sendTenantFrozenAlert(input: {
+    tenantName: string
+    tenantId: string
+    reason: string
+  }): Promise<boolean> {
+    if (!config.email.notificationsEnabled || config.email.to.length === 0) {
+      return false
+    }
+
+    await this.transport.sendMail({
+      from: config.email.from,
+      to: config.email.to,
+      subject: `[ComFlow] Tenant frozen: ${input.tenantName}`,
+      text: [
+        `Tenant "${input.tenantName}" (${input.tenantId}) was automatically frozen.`,
+        '',
+        `Reason: ${input.reason}`,
+        '',
+        'Provisioning, top-ups, and inbound service are suspended until an',
+        'operator reactivates the tenant on the Tenants page.',
+      ].join('\n'),
+    })
+    return true
+  }
 }

@@ -7,6 +7,7 @@ import {
 import { HttpError } from '../lib/errors.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
 import { requireAdmin } from '../middleware/requireAdmin.js'
+import { requireVerifiedEmail } from '../middleware/requireVerifiedEmail.js'
 import { DidProvisioningService } from '../services/didProvisioningService.js'
 
 export function createDidsRouter(service: DidProvisioningService) {
@@ -41,10 +42,11 @@ export function createDidsRouter(service: DidProvisioningService) {
   router.post(
     '/',
     requireAdmin,
+    requireVerifiedEmail,
     asyncHandler(async (request, response) => {
       const user = response.locals.user as User
       const input = parseBody(ProvisionDidRequestSchema, request.body)
-      const did = await service.provision(user.tenantId, input)
+      const did = await service.provision(user.tenantId, input, user.id)
       response.status(201).json({ did })
     })
   )
@@ -58,7 +60,7 @@ export function createDidsRouter(service: DidProvisioningService) {
         ? request.params.number[0]
         : request.params.number
       if (!number) throw new HttpError(400, 'DID number is required.')
-      await service.release(user.tenantId, number)
+      await service.release(user.tenantId, number, user.id)
       response.status(204).end()
     })
   )

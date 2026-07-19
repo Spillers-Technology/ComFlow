@@ -5,24 +5,18 @@ import {
   UpdateTenantLimitsRequestSchema,
   UpdateTenantRequestSchema,
 } from '../../../shared/src/index.js'
+import { User } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
 import { hashPassword } from '../lib/password.js'
+import { slugify } from '../lib/slug.js'
+import { db } from '../db/client.js'
 import { requireOwner } from '../middleware/requireOwner.js'
+import { auditRepository } from '../repositories/auditRepository.js'
 import { tenantLimitsRepository } from '../repositories/tenantLimitsRepository.js'
 import { tenantRepository } from '../repositories/tenantRepository.js'
 import { userRepository } from '../repositories/userRepository.js'
 import { toApiUser } from '../services/authService.js'
-
-function slugify(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 64) || `tenant-${Date.now()}`
-  )
-}
 
 function requireParam(value: string | string[] | undefined, label: string) {
   const id = Array.isArray(value) ? value[0] : value
@@ -48,13 +42,23 @@ export function createTenantsRouter() {
       if (tenantRepository.getBySlug(slug)) {
         throw new HttpError(409, 'A tenant with that slug already exists.')
       }
-      const tenant = tenantRepository.create({
-        name: input.name,
-        slug,
-        plan: input.plan,
-      })
-      // Materialize default limits so the new tenant is immediately usable.
-      tenantLimitsRepository.get(tenant.id)
+      const actor = response.locals.user as User
+      const tenant = db.transaction(() => {
+        const created = tenantRepository.create({
+          name: input.name,
+          slug,
+          plan: input.plan,
+        })
+        // Materialize default limits so the new tenant is immediately usable.
+        tenantLimitsRepository.get(created.id)
+        auditRepository.record({
+          actor: actor.id,
+          action: 'tenant.create',
+          tenantId: created.id,
+          detail: { plan: created.plan, via: 'tenants-api' },
+        })
+        return created
+      })()
       response.status(201).json({ tenant })
     })
   )
@@ -64,9 +68,33 @@ export function createTenantsRouter() {
     asyncHandler((request, response) => {
       const id = requireParam(request.params.id, 'Tenant id')
       const input = parseBody(UpdateTenantRequestSchema, request.body)
+      const previous = tenantRepository.getById(id)
       const tenant = tenantRepository.update(id, input)
       if (!tenant) throw new HttpError(404, 'Tenant not found.')
+      // Freeze/unfreeze is a privileged action worth an audit row either way.
+      if (input.status && input.status !== previous?.status) {
+        const user = response.locals.user as User
+        auditRepository.record({
+          actor: user.id,
+          action: input.status === 'suspended' ? 'tenant.freeze' : 'tenant.unfreeze',
+          tenantId: id,
+          detail: { via: 'tenants-api' },
+        })
+      }
       response.json({ tenant })
+    })
+  )
+
+  // The tenant's audit trail: registrations, DID orders, wallet credits,
+  // freezes. Owner-only, most recent first.
+  router.get(
+    '/:id/audit',
+    asyncHandler((request, response) => {
+      const id = requireParam(request.params.id, 'Tenant id')
+      if (!tenantRepository.getById(id)) {
+        throw new HttpError(404, 'Tenant not found.')
+      }
+      response.json({ items: auditRepository.listByTenant(id) })
     })
   )
 

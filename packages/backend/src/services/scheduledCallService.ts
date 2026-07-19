@@ -6,11 +6,13 @@ import {
 } from '../../../shared/src/index.js'
 import { config } from '../config.js'
 import { HttpError } from '../lib/errors.js'
+import { assertTenantActive } from '../lib/tenantGuards.js'
 import {
   ScheduledCallRecord,
   scheduledCallRepository,
 } from '../repositories/scheduledCallRepository.js'
 import { AudioPromptService } from './audioPromptService.js'
+import { BillingService } from './billingService.js'
 import { EngineService } from './engineService.js'
 import { TelephonyGatewayService } from './telephonyGatewayService.js'
 import { UsageService } from './usageService.js'
@@ -45,7 +47,8 @@ export class ScheduledCallService {
     private readonly engineService: EngineService,
     private readonly telephonyGateway: TelephonyGatewayService,
     private readonly audioPromptService: AudioPromptService,
-    private readonly usageService: UsageService = new UsageService()
+    private readonly usageService: UsageService = new UsageService(),
+    private readonly billingService: BillingService = new BillingService()
   ) {}
 
   list(tenantId: string): ScheduledCall[] {
@@ -53,6 +56,8 @@ export class ScheduledCallService {
   }
 
   create(input: CreateScheduledCallRequest, tenantId: string): ScheduledCall {
+    assertTenantActive(tenantId)
+    this.billingService.assertHasBalance(tenantId)
     const record = scheduledCallRepository.create({
       toNumber: input.toNumber,
       scheduledAt: input.scheduledAt,
@@ -126,12 +131,24 @@ export class ScheduledCallService {
   }
 
   private async runOne(record: ScheduledCallRecord) {
+    const tenantId = scheduledCallRepository.tenantIdOf(record.id)
+    if (!tenantId) {
+      scheduledCallRepository.update(record.id, {
+        status: 'failed',
+        lastError: 'Scheduled call tenant no longer exists.',
+      })
+      return
+    }
     scheduledCallRepository.update(record.id, {
       status: 'in_progress',
       attempts: record.attempts + 1,
     })
 
     try {
+      // Re-check immediately before TTS/dialing: the wallet may have emptied or
+      // a dispute may have frozen the tenant after this job was queued.
+      assertTenantActive(tenantId)
+      this.billingService.assertHasBalance(tenantId)
       const messageAudioPath = await this.resolveSegmentAudio(
         record.id,
         'message',
@@ -146,6 +163,7 @@ export class ScheduledCallService {
       )
 
       const result = await this.telephonyGateway.placeOutboundCall({
+        tenantId,
         toNumber: record.toNumber,
         messageAudioPath,
         questionAudioPath,
@@ -198,17 +216,14 @@ export class ScheduledCallService {
 
       // Meter the outbound call: TTS for each synthesized segment, the call
       // minutes, and STT/LLM when an answer was captured.
-      const tenantId = scheduledCallRepository.tenantIdOf(record.id)
-      if (tenantId) {
-        this.usageService.recordTts(tenantId)
-        this.usageService.recordTts(tenantId)
-        this.usageService.recordOutboundMinutes(
-          tenantId,
-          config.telephony.outboundCaptureWindowSec / 60
-        )
-        if (answerTranscript) {
-          this.usageService.record(tenantId, 'stt', 1, config.usageCosts.sttCents)
-        }
+      this.usageService.recordTts(tenantId)
+      this.usageService.recordTts(tenantId)
+      this.usageService.recordOutboundMinutes(
+        tenantId,
+        config.telephony.outboundCaptureWindowSec / 60
+      )
+      if (answerTranscript) {
+        this.usageService.record(tenantId, 'stt', 1, config.usageCosts.sttCents)
       }
     } catch (error) {
       scheduledCallRepository.update(record.id, {
