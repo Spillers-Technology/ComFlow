@@ -1023,8 +1023,8 @@
 <section class="section hero container">
   <div class="hero-copy">
     <div class="hero-eyebrow">
-      <span class="pill pill-live">Current release · v3.0.0</span>
-      <span class="pill pill-soon">In development · verified self-registration</span>
+      <span class="pill pill-live">Current release · v4.0.0</span>
+      <span class="pill pill-soon">Hosted signup · opening once billing is live</span>
     </div>
     <h1>Voicemail,<br><span class="glow-text">regulated.</span></h1>
     <p class="hero-sub">ComFlow answers calls over SIP, records voicemail, transcribes and structures it, and gives your team a focused review inbox — plus tightly scoped scheduled outbound calling. <strong>Bring your own trunk and self-host the current release</strong>, or follow the hosted flow as verified signup, prepaid funding, DID provisioning, and guided call forwarding move toward release.</p>
@@ -1195,9 +1195,9 @@
       <div class="bento-card card-hosted">
         <div class="bento-title">
           Run it as a service
-          <span class="pill pill-live" style="font-size:0.65rem; padding: 3px 9px;">New in 3.0</span>
+          <span class="pill pill-live" style="font-size:0.65rem; padding: 3px 9px;">New in 4.0</span>
         </div>
-        <div class="bento-desc">One SIP-provider account and one set of AI keys, many isolated customers. ComFlow 3.0 turns the self-hosted app into a multi-tenant platform — provision numbers, meter usage, and bill from a prepaid wallet, all behind a hard tenant boundary. Verified public signup and guided forwarding are the next release gate, not part of v3.0.0.</div>
+        <div class="bento-desc">One SIP-provider account and one set of AI keys, many isolated customers. ComFlow 4.0 adds self-service onboarding on top of the multi-tenant platform: a customer signs up, verifies their email, funds a wallet, provisions a number, and is walked through carrier call forwarding — without an operator running scripts. Paid actions stay gated on settled funds, plan caps, and a chargeback freeze.</div>
         <div class="hosted-grid">
           <div class="hosted-feat">
             <div class="hf-title">🏢 Multi-tenant isolation</div>
@@ -1221,12 +1221,12 @@
       <!-- Available NOW -->
       <div class="bento-card card-now">
         <div>
-          <span class="pill pill-live" style="margin-bottom: 14px; display: inline-flex;">⚡ Shipping today · v3.0.0</span>
+          <span class="pill pill-live" style="margin-bottom: 14px; display: inline-flex;">⚡ Shipping today · v4.0.0</span>
           <div class="now-headline">Self-host it,<br><span class="glow-text">or host it for others.</span></div>
         </div>
         <div class="now-desc">The whole loop is live: SIP capture → transcribe → extract → golden review inbox → AnchorDesk. Bring your own trunk and run it on your hardware, or stand it up as a multi-tenant service with DIDs, metering, and a prepaid wallet.</div>
         <div>
-          <a href="#access" class="btn btn-primary" style="white-space:nowrap;">Install v3.0.0 →</a>
+          <a href="#access" class="btn btn-primary" style="white-space:nowrap;">Install v4.0.0 →</a>
         </div>
       </div>
     </div>
@@ -1335,7 +1335,7 @@
       <div class="roadmap-label-block">
         <div class="section-label">Release status</div>
         <div class="roadmap-big"><span class="glow-text">Live now.</span><br>Next up.</div>
-        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">v3.0.0 ships the complete voicemail loop and the multi-tenant platform: DIDs, metering, a prepaid wallet, and an owner dashboard. The next release is closing the public-onboarding and fraud-control gates. Items marked building are not claims about the current release.</p>
+        <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 16px; line-height: 1.7;">v4.0.0 ships self-service onboarding on top of the multi-tenant platform: public signup, email verification, guided carrier call forwarding, and the fraud controls that make open signup survivable — settled-funds gating, per-tenant plan caps, chargeback freeze, and an audit trail. Items marked building are not claims about the current release.</p>
       </div>
 
       <ul class="roadmap-list">
@@ -1495,13 +1495,13 @@
       <div class="callout-phone">📨</div>
       <div class="callout-text">
         <h3>Self-host now. <span class="glow-text">Hosted signup next.</span></h3>
-        <p>ComFlow v3.0.0 is available today as an open-source container. The hosted app remains available to existing accounts at <a href="https://com.spillerstech.us" target="_blank" rel="noopener" style="color: var(--accent-2); text-decoration: underline;">com.spillerstech.us</a>; public registration stays closed until email verification, billing, provider, rate-limit, and fraud-control checks pass in production.</p>
+        <p>ComFlow v4.0.0 is available today as an open-source container, and self-hosters can switch signup on with a single environment variable. The hosted app at <a href="https://com.spillerstech.us" target="_blank" rel="noopener" style="color: var(--accent-2); text-decoration: underline;">com.spillerstech.us</a> opens public registration once it is running 4.0.0 with live billing configured.</p>
       </div>
       <a href="https://github.com/Spillers-Technology/ComFlow#get-it" target="_blank" rel="noopener" class="btn btn-primary" style="white-space:nowrap; align-self: center;">Install ComFlow →</a>
     </div>
     <p style="text-align:center; color: var(--text-muted); font-size: 0.85rem; margin-top: 24px; line-height: 1.7;">
       Rather run your own? It's open source and ships as a single container:
-      <code style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 0.82rem;">docker pull ghcr.io/spillers-technology/comflow:3.0.0</code>
+      <code style="background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; font-size: 0.82rem;">docker pull ghcr.io/spillers-technology/comflow:4.0.0</code>
       · <a href="https://github.com/Spillers-Technology/ComFlow" target="_blank" rel="noopener" style="color: var(--accent-2);">self-host guide on GitHub ↗</a>
     </p>
   </div>
