@@ -998,6 +998,99 @@
 
       .section { padding: 64px 0; }
     }
+
+    /* ── Pricing ─────────────────────────────────────────── */
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      align-items: stretch;
+    }
+
+    .price-card {
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 24px;
+      position: relative;
+    }
+
+    .price-card.featured {
+      border-color: var(--border-glow);
+      box-shadow: 0 0 40px rgba(124, 58, 237, 0.18);
+    }
+
+    .price-tag {
+      position: absolute;
+      top: -11px;
+      left: 24px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--bg);
+      background: var(--accent-2);
+      border-radius: 999px;
+      padding: 4px 12px;
+    }
+
+    .price-name {
+      font-size: 1.15rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .price-amount {
+      font-size: 2.6rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+    }
+
+    .price-period { color: var(--text-muted); font-size: 0.92rem; }
+
+    .price-desc {
+      color: var(--text-muted);
+      font-size: 0.92rem;
+      line-height: 1.65;
+      margin: 14px 0 20px;
+      min-height: 3.3em;
+    }
+
+    .price-features {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 24px;
+      flex: 1;
+    }
+
+    .price-features li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.93rem;
+    }
+
+    .price-check { color: var(--accent-2); font-weight: 700; }
+
+    .price-note {
+      color: var(--text-muted);
+      font-size: 0.86rem;
+      line-height: 1.7;
+      margin-top: 28px;
+      max-width: 620px;
+    }
+
+    .price-note a { color: var(--accent-2); text-decoration: underline; }
+
+    /* Declared after the base grid so it wins the cascade on small screens. */
+    @media (max-width: 860px) {
+      .pricing-grid { grid-template-columns: 1fr; }
+    }
 </style>
 <link rel="stylesheet" href="assets/lightbox.css" />
 </head>
@@ -1011,6 +1104,7 @@
       <a href="#features">Features</a>
       <a href="#how-it-works">How It Works</a>
       <a href="#screenshots">Screenshots</a>
+      <a href="#pricing">Pricing</a>
       <a href="#roadmap">Release status</a>
       <a href="#access">Install</a>
       <a href="https://com.spillerstech.us" target="_blank" rel="noopener">Hosted app ↗</a>
@@ -1023,13 +1117,13 @@
 <section class="section hero container">
   <div class="hero-copy">
     <div class="hero-eyebrow">
-      <span class="pill pill-live">Current release · v4.0.0</span>
-      <span class="pill pill-soon">Hosted signup · opening once billing is live</span>
+      <span class="pill pill-live">Current release · v4.1.0</span>
+      <span class="pill pill-soon">Hosted signup · from $9/month</span>
     </div>
     <h1>Voicemail,<br><span class="glow-text">regulated.</span></h1>
-    <p class="hero-sub">ComFlow answers calls over SIP, records voicemail, transcribes and structures it, and gives your team a focused review inbox — plus tightly scoped scheduled outbound calling. <strong>Bring your own trunk and self-host the current release</strong>, or follow the hosted flow as verified signup, prepaid funding, DID provisioning, and guided call forwarding move toward release.</p>
+    <p class="hero-sub">ComFlow answers calls over SIP, records voicemail, transcribes and structures it, and gives your team a focused review inbox — plus tightly scoped scheduled outbound calling. <strong>Sign up, pick a plan, and get your own number in minutes</strong>, or bring your own SIP trunk and self-host the whole thing for free.</p>
     <div class="hero-actions">
-      <a href="#access" class="btn btn-primary">Install ComFlow →</a>
+      <a href="https://com.spillerstech.us/register" class="btn btn-primary">Get your number →</a>
       <a href="https://github.com/Spillers-Technology/ComFlow" target="_blank" rel="noopener" class="btn btn-ghost">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg>
         View on GitHub
@@ -1329,6 +1423,58 @@
 </section>
 
 <!-- ── Release status ───────────────────────────────────────── -->
+<!-- ── Pricing ─────────────────────────────────────────────── -->
+<section class="section" id="pricing">
+  <div class="container">
+    <div class="section-label">Pricing</div>
+    <h2 class="section-title">One number. <span class="glow-text">Nine dollars.</span></h2>
+    <p class="section-sub">Forward your cell to a ComFlow number and stop losing the calls you miss. Every plan includes transcription, AI summaries, and the review inbox — the bands differ only in how many numbers, minutes, and simultaneous calls you get.</p>
+
+    <div class="pricing-grid">
+      <div class="price-card">
+        <div class="price-name">Solo</div>
+        <div><span class="price-amount">$9</span><span class="price-period"> / month</span></div>
+        <p class="price-desc">One number for one person. Forward your cell and stop missing calls.</p>
+        <ul class="price-features">
+          <li><span class="price-check">✓</span> 1 phone number</li>
+          <li><span class="price-check">✓</span> 200 minutes included</li>
+          <li><span class="price-check">✓</span> 1 call at a time</li>
+        </ul>
+        <a href="https://com.spillerstech.us/register" class="btn btn-ghost">Start with Solo</a>
+      </div>
+
+      <div class="price-card featured">
+        <span class="price-tag">Most popular</span>
+        <div class="price-name">Pro</div>
+        <div><span class="price-amount">$29</span><span class="price-period"> / month</span></div>
+        <p class="price-desc">A second line and room for overlapping calls, for a small business.</p>
+        <ul class="price-features">
+          <li><span class="price-check">✓</span> 2 phone numbers</li>
+          <li><span class="price-check">✓</span> 600 minutes included</li>
+          <li><span class="price-check">✓</span> 3 calls at a time</li>
+        </ul>
+        <a href="https://com.spillerstech.us/register" class="btn btn-primary">Start with Pro →</a>
+      </div>
+
+      <div class="price-card">
+        <div class="price-name">Business</div>
+        <div><span class="price-amount">$79</span><span class="price-period"> / month</span></div>
+        <p class="price-desc">Numbers for a team, with the whole trunk available at once.</p>
+        <ul class="price-features">
+          <li><span class="price-check">✓</span> 5 phone numbers</li>
+          <li><span class="price-check">✓</span> 2,000 minutes included</li>
+          <li><span class="price-check">✓</span> 10 calls at a time</li>
+        </ul>
+        <a href="https://com.spillerstech.us/register" class="btn btn-ghost">Start with Business</a>
+      </div>
+    </div>
+
+    <p class="price-note">
+      Minutes beyond your plan draw from a prepaid balance, billed at carrier cost plus markup and itemized per line. Cancel any time from your account — your plan runs to the end of the period you have already paid for. Outbound calling is off by default and enabled only after a conversation with us. Prefer to run it yourself? ComFlow is source-available and <a href="#access">self-hosts with your own SIP trunk</a> at no cost.
+    </p>
+  </div>
+</section>
+
 <section class="section" id="roadmap">
   <div class="container">
     <div class="roadmap-grid">
