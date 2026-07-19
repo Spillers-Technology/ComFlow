@@ -225,6 +225,74 @@ export class BillingService {
   }
 
   /**
+   * Owner-only goodwill credit or correction, applied directly to the wallet
+   * without touching Stripe. Use for "the transcription was garbage, here's a
+   * few dollars back" — a real refund of a real charge is refundCharge.
+   * A negative amount claws credit back.
+   */
+  adjustWallet(input: {
+    tenantId: string
+    amountCents: number
+    reason: string
+    actorId: string
+  }): Wallet {
+    if (!Number.isInteger(input.amountCents) || input.amountCents === 0) {
+      throw new HttpError(400, 'Enter a non-zero whole number of cents.')
+    }
+    if (!tenantRepository.getById(input.tenantId)) {
+      throw new HttpError(404, 'Tenant not found.')
+    }
+
+    db.transaction(() => {
+      billingRepository.addCredit(input.tenantId, input.amountCents)
+      auditRepository.record({
+        actor: input.actorId,
+        action: 'wallet.manual_adjustment',
+        tenantId: input.tenantId,
+        detail: { amountCents: input.amountCents, reason: input.reason },
+      })
+    })()
+    return this.wallet(input.tenantId)
+  }
+
+  /**
+   * Refund a Stripe charge. The charge id comes from the operator (the Stripe
+   * dashboard shows it) because ComFlow does not persist charge ids — the
+   * webhook path only needs the event id for idempotency.
+   *
+   * This deliberately does not also debit the wallet: refunding the customer's
+   * card and clawing back credit they may already have spent are separate
+   * decisions. Use adjustWallet if both are wanted.
+   */
+  async refundCharge(input: {
+    tenantId: string
+    chargeId: string
+    amountCents?: number
+    reason: string
+    actorId: string
+  }): Promise<{ refundId: string; amountCents: number }> {
+    if (!tenantRepository.getById(input.tenantId)) {
+      throw new HttpError(404, 'Tenant not found.')
+    }
+    const result = await this.provider.refund({
+      chargeId: input.chargeId,
+      amountCents: input.amountCents,
+    })
+    auditRepository.record({
+      actor: input.actorId,
+      action: 'billing.refunded',
+      tenantId: input.tenantId,
+      detail: {
+        chargeId: input.chargeId,
+        refundId: result.id,
+        amountCents: result.amountCents,
+        reason: input.reason,
+      },
+    })
+    return { refundId: result.id, amountCents: result.amountCents }
+  }
+
+  /**
    * Apply a verified provider webhook. Settled payments credit the wallet
    * idempotently; a dispute (chargeback) freezes the tenant and alerts the
    * operator.

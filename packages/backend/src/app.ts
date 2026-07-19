@@ -450,7 +450,7 @@ export function createApp() {
   app.use('/api/users', requireAuth, requireAdmin, createUsersRouter())
   app.use('/api/usage', requireAuth, createUsageRouter(usageService))
   app.use('/api/billing', requireAuth, createBillingRouter(billingService))
-  app.use('/api/tenants', requireAuth, createTenantsRouter())
+  app.use('/api/tenants', requireAuth, createTenantsRouter(billingService))
 
   // Serve the built frontend (production single-image deploy). API routes above
   // win; everything else falls back to the SPA entry point.

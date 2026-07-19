@@ -31,6 +31,7 @@ import {
   updateTenant,
   updateTenantLimits,
 } from '../lib/api'
+import { TenantSupportCard } from '../components/TenantSupportCard'
 
 export function TenantsPage() {
   const { user, authRequired } = useAuth()
@@ -385,6 +386,8 @@ export function TenantsPage() {
             </CardContent>
           </Card>
         )}
+
+        {selectedId && <TenantSupportCard tenantId={selectedId} />}
       </Stack>
     </Container>
   )

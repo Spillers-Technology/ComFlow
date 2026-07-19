@@ -6,6 +6,10 @@ import {
   MfaEnrollResponseSchema,
   MfaStatusSchema,
   SessionGrantSchema,
+  RefundRequest,
+  RefundResponseSchema,
+  TenantSubscriptionResponseSchema,
+  WalletAdjustmentRequest,
   OutboundAccessRequest,
   OutboundAccessResponseSchema,
   OutboundStatusSchema,
@@ -501,6 +505,33 @@ export function resendVerification(email: string) {
     '/api/auth/resend-verification',
     { method: 'POST', body: JSON.stringify({ email }) },
     ResendVerificationResponseSchema
+  )
+}
+
+export function getTenantSubscription(id: string) {
+  return request(
+    `/api/tenants/${id}/subscription`,
+    { method: 'GET' },
+    TenantSubscriptionResponseSchema
+  )
+}
+
+export function adjustTenantWallet(
+  id: string,
+  payload: WalletAdjustmentRequest
+) {
+  return request(
+    `/api/tenants/${id}/wallet-adjustment`,
+    { method: 'POST', body: JSON.stringify(payload) },
+    WalletResponseSchema
+  )
+}
+
+export function refundTenantCharge(id: string, payload: RefundRequest) {
+  return request(
+    `/api/tenants/${id}/refund`,
+    { method: 'POST', body: JSON.stringify(payload) },
+    RefundResponseSchema
   )
 }
 

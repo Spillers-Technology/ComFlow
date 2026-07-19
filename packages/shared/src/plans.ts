@@ -137,6 +137,18 @@ export const SubscriptionResponseSchema = z.object({
   subscription: SubscriptionSchema,
 })
 
+// Owner support view: the plan plus the wallet, in one call.
+export const TenantSubscriptionResponseSchema = z.object({
+  subscription: SubscriptionSchema,
+  wallet: z.object({
+    creditCents: z.number().int(),
+    billedCents: z.number().int(),
+    balanceCents: z.number().int(),
+    plan: z.string().nullable(),
+    stripeCustomerId: z.string().nullable(),
+  }),
+})
+
 export const PortalResponseSchema = z.object({
   portalUrl: z.string(),
 })
@@ -146,3 +158,6 @@ export type SubscribeRequest = z.infer<typeof SubscribeRequestSchema>
 export type PlanCatalogResponse = z.infer<typeof PlanCatalogResponseSchema>
 export type SubscriptionResponse = z.infer<typeof SubscriptionResponseSchema>
 export type PortalResponse = z.infer<typeof PortalResponseSchema>
+export type TenantSubscriptionResponse = z.infer<
+  typeof TenantSubscriptionResponseSchema
+>

@@ -2,8 +2,10 @@ import { Router } from 'express'
 import {
   CreateTenantRequestSchema,
   CreateUserRequestSchema,
+  RefundRequestSchema,
   UpdateTenantLimitsRequestSchema,
   UpdateTenantRequestSchema,
+  WalletAdjustmentRequestSchema,
 } from '../../../shared/src/index.js'
 import { User } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
@@ -17,6 +19,7 @@ import { tenantLimitsRepository } from '../repositories/tenantLimitsRepository.j
 import { tenantRepository } from '../repositories/tenantRepository.js'
 import { userRepository } from '../repositories/userRepository.js'
 import { toApiUser } from '../services/authService.js'
+import { BillingService } from '../services/billingService.js'
 
 function requireParam(value: string | string[] | undefined, label: string) {
   const id = Array.isArray(value) ? value[0] : value
@@ -26,7 +29,7 @@ function requireParam(value: string | string[] | undefined, label: string) {
 
 /** Platform-owner tenant management: create/list/update tenants, set plan limits,
  * and seed a tenant's first org-admin. Owner-only across the board. */
-export function createTenantsRouter() {
+export function createTenantsRouter(billingService: BillingService) {
   const router = Router()
   router.use(requireOwner)
 
@@ -118,6 +121,59 @@ export function createTenantsRouter() {
       }
       const input = parseBody(UpdateTenantLimitsRequestSchema, request.body)
       response.json({ limits: tenantLimitsRepository.update(id, input) })
+    })
+  )
+
+  // Support view: what the customer is paying and where they are in the cycle,
+  // so an operator can answer a billing question without opening Stripe.
+  router.get(
+    '/:id/subscription',
+    asyncHandler((request, response) => {
+      const id = requireParam(request.params.id, 'Tenant id')
+      if (!tenantRepository.getById(id)) {
+        throw new HttpError(404, 'Tenant not found.')
+      }
+      response.json({
+        subscription: billingService.subscription(id),
+        wallet: billingService.wallet(id),
+      })
+    })
+  )
+
+  // Goodwill credit or correction, straight to the wallet. Audited.
+  router.post(
+    '/:id/wallet-adjustment',
+    asyncHandler((request, response) => {
+      const id = requireParam(request.params.id, 'Tenant id')
+      const user = response.locals.user as User
+      const input = parseBody(WalletAdjustmentRequestSchema, request.body)
+      response.status(201).json({
+        wallet: billingService.adjustWallet({
+          tenantId: id,
+          amountCents: input.amountCents,
+          reason: input.reason,
+          actorId: user.id,
+        }),
+      })
+    })
+  )
+
+  // Refund a real Stripe charge. Audited.
+  router.post(
+    '/:id/refund',
+    asyncHandler(async (request, response) => {
+      const id = requireParam(request.params.id, 'Tenant id')
+      const user = response.locals.user as User
+      const input = parseBody(RefundRequestSchema, request.body)
+      response.status(201).json(
+        await billingService.refundCharge({
+          tenantId: id,
+          chargeId: input.chargeId,
+          amountCents: input.amountCents,
+          reason: input.reason,
+          actorId: user.id,
+        })
+      )
     })
   )
 
