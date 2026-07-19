@@ -26,6 +26,36 @@ export class FakeBillingProvider implements BillingProvider {
     }
   }
 
+  async createSubscriptionCheckout(input: {
+    tenantId: string
+    customerId: string
+    band: string
+    priceId: string
+  }): Promise<CheckoutSession> {
+    return {
+      url: `https://fake.checkout/subscribe?tenant=${input.tenantId}&band=${input.band}`,
+    }
+  }
+
+  async createPortalSession(input: {
+    customerId: string
+    returnUrl: string
+  }): Promise<CheckoutSession> {
+    return {
+      url: `https://fake.checkout/portal?customer=${input.customerId}&return=${encodeURIComponent(input.returnUrl)}`,
+    }
+  }
+
+  async refund(input: {
+    chargeId: string
+    amountCents?: number
+  }): Promise<{ id: string; amountCents: number }> {
+    return {
+      id: `fake_re_${input.chargeId}`,
+      amountCents: input.amountCents ?? 0,
+    }
+  }
+
   async parseWebhook(input: {
     rawBody: Buffer | string
     signature: string | undefined
@@ -33,9 +63,39 @@ export class FakeBillingProvider implements BillingProvider {
     void input.signature
     const body = JSON.parse(
       typeof input.rawBody === 'string' ? input.rawBody : input.rawBody.toString()
-    ) as { type?: string; tenantId?: string; amountCents?: number; id?: string }
+    ) as {
+      type?: string
+      tenantId?: string
+      amountCents?: number
+      id?: string
+      subscription?: {
+        stripeSubscriptionId: string
+        status: string
+        band: string | null
+        currentPeriodStart: string | null
+        currentPeriodEnd: string | null
+        cancelAtPeriodEnd: boolean
+      }
+    }
 
     if (!body.tenantId) return null
+
+    if (body.type === 'subscription_updated' && body.subscription) {
+      return {
+        id: body.id ?? randomUUID(),
+        type: 'subscription_updated',
+        tenantId: body.tenantId,
+        subscription: body.subscription,
+      }
+    }
+
+    if (body.type === 'subscription_payment_failed') {
+      return {
+        id: body.id ?? randomUUID(),
+        type: 'subscription_payment_failed',
+        tenantId: body.tenantId,
+      }
+    }
 
     if (body.type === 'payment_succeeded' && body.amountCents) {
       return {

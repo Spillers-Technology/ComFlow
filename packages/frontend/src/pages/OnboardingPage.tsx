@@ -17,23 +17,34 @@ import {
 } from '@mui/material'
 import {
   ProvisionedDid,
+  Subscription,
   Wallet,
+  statusGrantsService,
 } from '../../../shared/src/index.js'
 import { useAuth } from '../app/useAuth'
 import { DidManagerCard } from '../components/DidManagerCard'
 import { ForwardingSetupCard } from '../components/ForwardingSetupCard'
 import {
   getDids,
+  getSubscription,
   getWallet,
   resendVerification,
   startTopUp,
 } from '../lib/api'
+import { PlanPicker } from '../components/PlanPicker'
 
-const STEPS = ['Verify email', 'Fund wallet', 'Choose number', 'Set up forwarding']
+const STEPS = [
+  'Verify email',
+  'Choose plan',
+  'Fund wallet',
+  'Choose number',
+  'Set up forwarding',
+]
 
 export function OnboardingPage() {
   const { user } = useAuth()
   const [wallet, setWallet] = useState<Wallet | null>(null)
+  const [subscription, setSubscription] = useState<Subscription | null>(null)
   const [dids, setDids] = useState<ProvisionedDid[]>([])
   const [amount, setAmount] = useState('20')
   const [loading, setLoading] = useState(true)
@@ -45,9 +56,14 @@ export function OnboardingPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [walletResult, didResult] = await Promise.all([getWallet(), getDids()])
+      const [walletResult, didResult, subscriptionResult] = await Promise.all([
+        getWallet(),
+        getDids(),
+        getSubscription(),
+      ])
       setWallet(walletResult.wallet)
       setDids(didResult.items)
+      setSubscription(subscriptionResult.subscription)
       setError(null)
     } catch (reason) {
       setError((reason as Error).message)
@@ -65,8 +81,23 @@ export function OnboardingPage() {
     [dids]
   )
   const verified = user?.emailVerified !== false
+  // A plan is what grants numbers and included minutes; the wallet only covers
+  // usage past the plan, so subscribing comes before funding.
+  const subscribed = Boolean(
+    subscription &&
+      subscription.band !== 'free' &&
+      statusGrantsService(subscription.status)
+  )
   const funded = Boolean(wallet && wallet.balanceCents > 0)
-  const activeStep = !verified ? 0 : !funded ? 1 : activeDids.length === 0 ? 2 : 3
+  const activeStep = !verified
+    ? 0
+    : !subscribed
+      ? 1
+      : !funded
+        ? 2
+        : activeDids.length === 0
+          ? 3
+          : 4
 
   async function handleTopUp() {
     const cents = Math.round(Number(amount) * 100)
@@ -151,11 +182,26 @@ export function OnboardingPage() {
           </Card>
         )}
 
-        {!loading && verified && !funded && (
+        {!loading && verified && !subscribed && (
           <Card>
             <CardHeader
-              title="2. Fund your wallet"
-              subheader="Carrier charges come from a prepaid balance. Funds appear only after payment confirmation."
+              title="2. Choose your plan"
+              subheader="Your plan sets how many numbers, minutes, and simultaneous calls you get each month."
+            />
+            <CardContent>
+              <PlanPicker
+                currentBand={subscription?.band}
+                onError={setError}
+              />
+            </CardContent>
+          </Card>
+        )}
+
+        {!loading && verified && subscribed && !funded && (
+          <Card>
+            <CardHeader
+              title="3. Fund your wallet"
+              subheader="Minutes beyond your plan draw from a prepaid balance. Funds appear only after payment confirmation."
             />
             <CardContent>
               <Stack
@@ -183,10 +229,10 @@ export function OnboardingPage() {
           </Card>
         )}
 
-        {!loading && verified && funded && activeDids.length === 0 && (
+        {!loading && verified && subscribed && funded && activeDids.length === 0 && (
           <Box>
             <Typography variant="h5" component="h2" fontWeight={700} sx={{ mb: 2 }}>
-              3. Choose your ComFlow number
+              4. Choose your ComFlow number
             </Typography>
             <DidManagerCard onChange={() => void load()} />
           </Box>

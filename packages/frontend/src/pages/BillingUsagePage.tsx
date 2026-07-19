@@ -22,6 +22,7 @@ import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import { UsageSummary, Wallet } from '../../../shared/src/index.js'
 import { useAuth } from '../app/useAuth'
 import { getUsage, getWallet, startTopUp } from '../lib/api'
+import { SubscriptionCard } from '../components/SubscriptionCard'
 
 const money = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
@@ -114,6 +115,8 @@ export function BillingUsagePage() {
           <Alert severity="info">Checkout was canceled; your wallet was not changed.</Alert>
         )}
         {loading && <LinearProgress />}
+
+        <SubscriptionCard />
 
         {wallet && (
           <Card>

@@ -7,6 +7,7 @@ import {
 import { config } from '../config.js'
 import { HttpError } from '../lib/errors.js'
 import { assertTenantActive } from '../lib/tenantGuards.js'
+import { OutboundGuardService } from './outboundGuardService.js'
 import {
   ScheduledCallRecord,
   scheduledCallRepository,
@@ -48,7 +49,8 @@ export class ScheduledCallService {
     private readonly telephonyGateway: TelephonyGatewayService,
     private readonly audioPromptService: AudioPromptService,
     private readonly usageService: UsageService = new UsageService(),
-    private readonly billingService: BillingService = new BillingService()
+    private readonly billingService: BillingService = new BillingService(),
+    private readonly outboundGuard: OutboundGuardService = new OutboundGuardService()
   ) {}
 
   list(tenantId: string): ScheduledCall[] {
@@ -57,6 +59,9 @@ export class ScheduledCallService {
 
   create(input: CreateScheduledCallRequest, tenantId: string): ScheduledCall {
     assertTenantActive(tenantId)
+    // Reject at the API boundary so the caller gets a clear reason, rather than
+    // accepting the job and having it fail silently in the scheduler later.
+    this.outboundGuard.assertAllowed(tenantId, input.toNumber)
     this.billingService.assertHasBalance(tenantId)
     const record = scheduledCallRepository.create({
       toNumber: input.toNumber,
@@ -148,6 +153,9 @@ export class ScheduledCallService {
       // Re-check immediately before TTS/dialing: the wallet may have emptied or
       // a dispute may have frozen the tenant after this job was queued.
       assertTenantActive(tenantId)
+      // Re-checked immediately before dialing: a call scheduled days ago may
+      // since have had its outbound grant revoked or blown the daily caps.
+      this.outboundGuard.assertAllowed(tenantId, record.toNumber)
       this.billingService.assertHasBalance(tenantId)
       const messageAudioPath = await this.resolveSegmentAudio(
         record.id,

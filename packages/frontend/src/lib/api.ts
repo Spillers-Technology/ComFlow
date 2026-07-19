@@ -1,5 +1,22 @@
 import {
   AuthProvidersResponseSchema,
+  CompleteMfaLoginRequest,
+  CompletePasswordResetResponseSchema,
+  MfaConfirmResponseSchema,
+  MfaEnrollResponseSchema,
+  MfaStatusSchema,
+  SessionGrantSchema,
+  RefundRequest,
+  RefundResponseSchema,
+  TenantSubscriptionResponseSchema,
+  WalletAdjustmentRequest,
+  OutboundAccessRequest,
+  OutboundAccessResponseSchema,
+  OutboundStatusSchema,
+  PlanBand,
+  PlanCatalogResponseSchema,
+  PortalResponseSchema,
+  SubscriptionResponseSchema,
   ApiKeyListResponseSchema,
   ChangePassword,
   CreateApiKeyResponseSchema,
@@ -54,6 +71,7 @@ import {
   ProvisionDidResponseSchema,
   RegisterRequest,
   RegisterResponseSchema,
+  ForgotPasswordResponseSchema,
   ResendVerificationResponseSchema,
   SearchDidsResponseSchema,
   TenantLimitsResponseSchema,
@@ -337,7 +355,7 @@ export async function changePassword(payload: ChangePassword) {
     },
     body: JSON.stringify(payload),
   })
-  if (!response.ok && response.status !== 204) {
+  if (!response.ok) {
     let message = 'Failed to change password.'
     try {
       message = ((await response.json()) as { error?: string }).error ?? message
@@ -346,6 +364,10 @@ export async function changePassword(payload: ChangePassword) {
     }
     throw new Error(message)
   }
+  // Changing the password revokes every session, including this one. The
+  // backend hands back a replacement so the current tab stays signed in.
+  const body = (await response.json()) as { token?: string }
+  if (body.token) setToken(body.token)
 }
 
 export function getApiKeys() {
@@ -483,6 +505,138 @@ export function resendVerification(email: string) {
     '/api/auth/resend-verification',
     { method: 'POST', body: JSON.stringify({ email }) },
     ResendVerificationResponseSchema
+  )
+}
+
+export function getTenantSubscription(id: string) {
+  return request(
+    `/api/tenants/${id}/subscription`,
+    { method: 'GET' },
+    TenantSubscriptionResponseSchema
+  )
+}
+
+export function adjustTenantWallet(
+  id: string,
+  payload: WalletAdjustmentRequest
+) {
+  return request(
+    `/api/tenants/${id}/wallet-adjustment`,
+    { method: 'POST', body: JSON.stringify(payload) },
+    WalletResponseSchema
+  )
+}
+
+export function refundTenantCharge(id: string, payload: RefundRequest) {
+  return request(
+    `/api/tenants/${id}/refund`,
+    { method: 'POST', body: JSON.stringify(payload) },
+    RefundResponseSchema
+  )
+}
+
+export function getOutboundStatus() {
+  return request('/api/outbound', { method: 'GET' }, OutboundStatusSchema)
+}
+
+export function requestOutboundAccess(payload: OutboundAccessRequest) {
+  return request(
+    '/api/outbound/request',
+    { method: 'POST', body: JSON.stringify(payload) },
+    OutboundAccessResponseSchema
+  )
+}
+
+export function getPlans() {
+  return request('/api/billing/plans', { method: 'GET' }, PlanCatalogResponseSchema)
+}
+
+export function getSubscription() {
+  return request(
+    '/api/billing/subscription',
+    { method: 'GET' },
+    SubscriptionResponseSchema
+  )
+}
+
+export function startSubscription(band: PlanBand) {
+  return request(
+    '/api/billing/subscribe',
+    { method: 'POST', body: JSON.stringify({ band }) },
+    CheckoutResponseSchema
+  )
+}
+
+export function openBillingPortal() {
+  return request(
+    '/api/billing/portal',
+    { method: 'POST', body: JSON.stringify({}) },
+    PortalResponseSchema
+  )
+}
+
+export function completeMfaLogin(payload: CompleteMfaLoginRequest) {
+  return request(
+    '/api/auth/login/mfa',
+    { method: 'POST', body: JSON.stringify(payload) },
+    SessionGrantSchema
+  )
+}
+
+export function getMfaStatus() {
+  return request('/api/me/mfa', { method: 'GET' }, MfaStatusSchema)
+}
+
+export function beginMfaEnrollment() {
+  return request(
+    '/api/me/mfa/enroll',
+    { method: 'POST', body: JSON.stringify({}) },
+    MfaEnrollResponseSchema
+  )
+}
+
+export function confirmMfaEnrollment(code: string) {
+  return request(
+    '/api/me/mfa/confirm',
+    { method: 'POST', body: JSON.stringify({ code }) },
+    MfaConfirmResponseSchema
+  )
+}
+
+export async function disableMfa(password: string) {
+  const token = getToken()
+  const response = await fetch('/api/me/mfa', {
+    method: 'DELETE',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ password }),
+  })
+  if (!response.ok && response.status !== 204) {
+    let message = 'Failed to disable two-factor authentication.'
+    try {
+      message = ((await response.json()) as { error?: string }).error ?? message
+    } catch {
+      // keep the generic message
+    }
+    throw new Error(message)
+  }
+}
+
+export function forgotPassword(email: string) {
+  return request(
+    '/api/auth/forgot-password',
+    { method: 'POST', body: JSON.stringify({ email }) },
+    ForgotPasswordResponseSchema
+  )
+}
+
+export function resetPassword(token: string, password: string) {
+  return request(
+    '/api/auth/reset-password',
+    { method: 'POST', body: JSON.stringify({ token, password }) },
+    CompletePasswordResetResponseSchema
   )
 }
 

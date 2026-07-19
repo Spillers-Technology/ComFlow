@@ -1,4 +1,10 @@
-import { Wallet } from '../../../shared/src/index.js'
+import {
+  PLAN_CATALOG,
+  PlanBand,
+  Subscription,
+  Wallet,
+  statusGrantsService,
+} from '../../../shared/src/index.js'
 import { config } from '../config.js'
 import { db } from '../db/client.js'
 import { HttpError } from '../lib/errors.js'
@@ -6,6 +12,7 @@ import { assertTenantActive } from '../lib/tenantGuards.js'
 import { auditRepository } from '../repositories/auditRepository.js'
 import { billingAlertRepository } from '../repositories/billingAlertRepository.js'
 import { billingRepository } from '../repositories/billingRepository.js'
+import { tenantLimitsRepository } from '../repositories/tenantLimitsRepository.js'
 import { tenantRepository } from '../repositories/tenantRepository.js'
 import { usageRepository } from '../repositories/usageRepository.js'
 import { userRepository } from '../repositories/userRepository.js'
@@ -128,6 +135,163 @@ export class BillingService {
     }
   }
 
+  /** Start a Checkout session that subscribes the tenant to a band. */
+  async startSubscription(tenantId: string, band: PlanBand): Promise<string> {
+    assertTenantActive(tenantId)
+    const plan = PLAN_CATALOG[band]
+    if (!plan?.purchasable) {
+      throw new HttpError(400, 'That plan cannot be purchased.')
+    }
+    const priceId = config.billing.priceIds[band]
+    if (!priceId) {
+      throw new HttpError(
+        500,
+        `No Stripe price is configured for the ${plan.name} plan.`
+      )
+    }
+
+    const billing = billingRepository.get(tenantId)
+    const customerId = await this.provider.ensureCustomer({
+      tenantId,
+      existingCustomerId: billing.stripeCustomerId,
+      email: this.tenantBillingEmail(tenantId),
+    })
+    if (customerId !== billing.stripeCustomerId) {
+      billingRepository.setCustomer(tenantId, customerId)
+    }
+
+    const session = await this.provider.createSubscriptionCheckout({
+      tenantId,
+      customerId,
+      band,
+      priceId,
+    })
+    auditRepository.record({
+      actor: 'system:billing',
+      action: 'subscription.checkout_started',
+      tenantId,
+      detail: { band },
+    })
+    return session.url
+  }
+
+  /**
+   * A link to Stripe's hosted billing portal, where the customer changes plan,
+   * updates their card, or cancels. Deliberately not reimplemented in ComFlow:
+   * Stripe's portal is already correct about proration and dunning.
+   */
+  async portalUrl(tenantId: string): Promise<string> {
+    const billing = billingRepository.get(tenantId)
+    if (!billing.stripeCustomerId) {
+      throw new HttpError(
+        400,
+        'This account has no billing history yet. Choose a plan first.'
+      )
+    }
+    const session = await this.provider.createPortalSession({
+      customerId: billing.stripeCustomerId,
+      returnUrl: config.billing.successUrl,
+    })
+    return session.url
+  }
+
+  /** The tenant's current subscription, including period usage so far. */
+  subscription(tenantId: string): Subscription {
+    const billing = billingRepository.get(tenantId)
+    const band = (billing.plan as PlanBand) ?? 'free'
+    return {
+      band: PLAN_CATALOG[band] ? band : 'free',
+      status: (billing.subscriptionStatus as Subscription['status']) ?? null,
+      stripeSubscriptionId: billing.stripeSubscriptionId,
+      currentPeriodStart: billing.currentPeriodStart,
+      currentPeriodEnd: billing.currentPeriodEnd,
+      cancelAtPeriodEnd: billing.cancelAtPeriodEnd,
+      includedMinutesUsed: this.includedMinutesUsed(tenantId),
+    }
+  }
+
+  /**
+   * Minutes consumed in the current billing period. Falls back to zero with no
+   * period recorded — a tenant that never subscribed has no allowance to spend.
+   */
+  includedMinutesUsed(tenantId: string): number {
+    const billing = billingRepository.get(tenantId)
+    if (!billing.currentPeriodStart || !billing.currentPeriodEnd) return 0
+    return usageRepository.minutesForPeriod(
+      tenantId,
+      billing.currentPeriodStart,
+      billing.currentPeriodEnd
+    )
+  }
+
+  /**
+   * Owner-only goodwill credit or correction, applied directly to the wallet
+   * without touching Stripe. Use for "the transcription was garbage, here's a
+   * few dollars back" — a real refund of a real charge is refundCharge.
+   * A negative amount claws credit back.
+   */
+  adjustWallet(input: {
+    tenantId: string
+    amountCents: number
+    reason: string
+    actorId: string
+  }): Wallet {
+    if (!Number.isInteger(input.amountCents) || input.amountCents === 0) {
+      throw new HttpError(400, 'Enter a non-zero whole number of cents.')
+    }
+    if (!tenantRepository.getById(input.tenantId)) {
+      throw new HttpError(404, 'Tenant not found.')
+    }
+
+    db.transaction(() => {
+      billingRepository.addCredit(input.tenantId, input.amountCents)
+      auditRepository.record({
+        actor: input.actorId,
+        action: 'wallet.manual_adjustment',
+        tenantId: input.tenantId,
+        detail: { amountCents: input.amountCents, reason: input.reason },
+      })
+    })()
+    return this.wallet(input.tenantId)
+  }
+
+  /**
+   * Refund a Stripe charge. The charge id comes from the operator (the Stripe
+   * dashboard shows it) because ComFlow does not persist charge ids — the
+   * webhook path only needs the event id for idempotency.
+   *
+   * This deliberately does not also debit the wallet: refunding the customer's
+   * card and clawing back credit they may already have spent are separate
+   * decisions. Use adjustWallet if both are wanted.
+   */
+  async refundCharge(input: {
+    tenantId: string
+    chargeId: string
+    amountCents?: number
+    reason: string
+    actorId: string
+  }): Promise<{ refundId: string; amountCents: number }> {
+    if (!tenantRepository.getById(input.tenantId)) {
+      throw new HttpError(404, 'Tenant not found.')
+    }
+    const result = await this.provider.refund({
+      chargeId: input.chargeId,
+      amountCents: input.amountCents,
+    })
+    auditRepository.record({
+      actor: input.actorId,
+      action: 'billing.refunded',
+      tenantId: input.tenantId,
+      detail: {
+        chargeId: input.chargeId,
+        refundId: result.id,
+        amountCents: result.amountCents,
+        reason: input.reason,
+      },
+    })
+    return { refundId: result.id, amountCents: result.amountCents }
+  }
+
   /**
    * Apply a verified provider webhook. Settled payments credit the wallet
    * idempotently; a dispute (chargeback) freezes the tenant and alerts the
@@ -149,6 +313,11 @@ export class BillingService {
         : event.tenantId ??
           (event.customerId
             ? billingRepository.tenantIdByCustomer(event.customerId)
+            : null) ??
+          (event.type === 'subscription_updated'
+            ? billingRepository.tenantIdBySubscription(
+                event.subscription.stripeSubscriptionId
+              )
             : null)
     if (!tenantId) {
       // Do not mark an unresolved dispute processed. Returning an error asks
@@ -203,6 +372,67 @@ export class BillingService {
             reason,
           })
         }
+        return
+      }
+
+      if (event.type === 'subscription_updated') {
+        const snapshot = event.subscription
+        // An unrecognized price means the catalog and Stripe have drifted.
+        // Record it but do not guess at limits.
+        const band = (snapshot.band as PlanBand) ?? null
+        const grants = statusGrantsService(snapshot.status)
+        const effectiveBand: PlanBand = grants && band ? band : 'free'
+
+        billingRepository.setSubscription(tenantId, {
+          band: effectiveBand,
+          stripeSubscriptionId: snapshot.stripeSubscriptionId,
+          status: snapshot.status,
+          currentPeriodStart: snapshot.currentPeriodStart,
+          currentPeriodEnd: snapshot.currentPeriodEnd,
+          cancelAtPeriodEnd: snapshot.cancelAtPeriodEnd,
+        })
+        // The band is the single source of truth for limits, so re-materialize
+        // on every subscription event: upgrades, downgrades, and cancellation
+        // all land here and all need the caps to follow.
+        tenantLimitsRepository.materialize(
+          tenantId,
+          PLAN_CATALOG[effectiveBand]
+        )
+        auditRepository.record({
+          actor: 'system:billing-webhook',
+          action: 'subscription.updated',
+          tenantId,
+          detail: {
+            band: effectiveBand,
+            reportedBand: snapshot.band,
+            status: snapshot.status,
+            cancelAtPeriodEnd: snapshot.cancelAtPeriodEnd,
+            eventId: event.id,
+          },
+        })
+        return
+      }
+
+      if (event.type === 'subscription_payment_failed') {
+        // Stripe has exhausted its retry schedule, so this is a real lapse
+        // rather than one declined charge. Drop to no-service limits but keep
+        // the tenant active — their data stays reachable and they can re-pay.
+        const billing = billingRepository.get(tenantId)
+        billingRepository.setSubscription(tenantId, {
+          band: 'free',
+          stripeSubscriptionId: billing.stripeSubscriptionId,
+          status: 'unpaid',
+          currentPeriodStart: billing.currentPeriodStart,
+          currentPeriodEnd: billing.currentPeriodEnd,
+          cancelAtPeriodEnd: billing.cancelAtPeriodEnd,
+        })
+        tenantLimitsRepository.materialize(tenantId, PLAN_CATALOG.free)
+        auditRepository.record({
+          actor: 'system:billing-webhook',
+          action: 'subscription.payment_failed',
+          tenantId,
+          detail: { eventId: event.id },
+        })
         return
       }
 

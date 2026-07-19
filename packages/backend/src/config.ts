@@ -48,6 +48,12 @@ function readProviderDefault<T extends string>(
   return parsed.success && parsed.data ? parsed.data : 'fake'
 }
 
+/**
+ * Fallback session-signing secret for dev and self-host open mode. Hosted mode
+ * refuses to boot on this value — see registrationService.assertConfiguration.
+ */
+export const DEV_SESSION_SECRET = 'comflow-dev-secret'
+
 export const config = {
   envFilePath,
   port: Number(process.env.PORT ?? 3001),
@@ -143,6 +149,14 @@ export const config = {
     cancelUrl:
       readOptionalEnv('STRIPE_CANCEL_URL') ??
       `${process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173'}/billing?status=cancel`,
+    // Stripe Price ids per purchasable band. They differ between test and live
+    // mode, so they are environment config rather than part of PLAN_CATALOG.
+    // Create the Products/Prices once in the Stripe dashboard and record them.
+    priceIds: {
+      solo: readOptionalEnv('COMFLOW_STRIPE_PRICE_SOLO'),
+      pro: readOptionalEnv('COMFLOW_STRIPE_PRICE_PRO'),
+      business: readOptionalEnv('COMFLOW_STRIPE_PRICE_BUSINESS'),
+    } as Record<string, string | undefined>,
   },
   secrets: {
     openaiApiKey: readEnv('COMFLOW_OPENAI_API_KEY', 'OPENAI_API_KEY'),
@@ -190,7 +204,12 @@ export const config = {
     localEnabled: process.env.AUTH_LOCAL_ENABLED !== 'false',
     sessionSecret:
       readEnv('AUTH_SESSION_SECRET', 'COMFLOW_AUTH_SESSION_SECRET') ||
-      'comflow-dev-secret',
+      DEV_SESSION_SECRET,
+    // Reset links are short-lived by design — much shorter than the email
+    // verification TTL, since a reset link is a full account takeover if leaked.
+    passwordResetTtlHours: Number(
+      process.env.COMFLOW_PASSWORD_RESET_TTL_HOURS ?? 2
+    ),
     bootstrapAdminEmail: readOptionalEnv('COMFLOW_BOOTSTRAP_ADMIN_EMAIL'),
     bootstrapAdminPassword: readOptionalEnv('COMFLOW_BOOTSTRAP_ADMIN_PASSWORD'),
     sessionTtlHours: Number(process.env.COMFLOW_AUTH_SESSION_TTL_HOURS ?? 720),
@@ -281,6 +300,26 @@ export const config = {
     maxDids: Number(process.env.COMFLOW_DEFAULT_MAX_DIDS ?? 1),
     includedMinutes: Number(process.env.COMFLOW_DEFAULT_INCLUDED_MINUTES ?? 0),
     markupBps: Number(process.env.COMFLOW_DEFAULT_MARKUP_BPS ?? 15000),
+  },
+  // Outbound calling is the highest-abuse surface: it spends money dialing
+  // arbitrary numbers. These ceilings apply on top of the per-tenant opt-in, so
+  // even an approved tenant cannot run up an unbounded bill in a day.
+  outbound: {
+    maxPerDay: Number(process.env.COMFLOW_OUTBOUND_MAX_PER_DAY ?? 50),
+    maxSpendPerDayCents: Number(
+      process.env.COMFLOW_OUTBOUND_MAX_SPEND_PER_DAY_CENTS ?? 2000
+    ),
+    // Total call duration ceiling, mirroring COMFLOW_INBOUND_MAX_DURATION_SEC.
+    maxDurationSec: Number(
+      process.env.COMFLOW_OUTBOUND_MAX_DURATION_SEC ?? 300
+    ),
+    // E.164 country calling codes that may be dialed. Defaults to NANP (+1),
+    // which covers the US and Canada — where the VoIP.ms DIDs live and where
+    // per-minute rates are predictable. Premium-rate and international
+    // destinations are where toll fraud actually pays, so they stay closed.
+    allowedCallingCodes: readCsvEnv('COMFLOW_OUTBOUND_ALLOWED_CODES').length
+      ? readCsvEnv('COMFLOW_OUTBOUND_ALLOWED_CODES')
+      : ['1'],
   },
   // The whole-trunk concurrent-call ceiling (e.g. a 10-channel SIP trunk).
   trunkConcurrentCallLimit: Number(process.env.COMFLOW_TRUNK_CHANNELS ?? 10),
