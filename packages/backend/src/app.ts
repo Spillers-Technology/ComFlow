@@ -12,6 +12,7 @@ import { createGroupsRouter } from './routes/groups.js'
 import { createHealthRouter } from './routes/health.js'
 import { createMailboxesRouter } from './routes/mailboxes.js'
 import { createMeRouter } from './routes/me.js'
+import { createOutboundRouter } from './routes/outbound.js'
 import { createPromptsRouter } from './routes/prompts.js'
 import { createScheduledCallsRouter } from './routes/scheduledCalls.js'
 import { createSettingsRouter } from './routes/settings.js'
@@ -427,6 +428,11 @@ export function createApp() {
     '/api/me',
     requireAuth,
     createMeRouter(registrationService, mfaService)
+  )
+  app.use(
+    '/api/outbound',
+    requireAuth,
+    createOutboundRouter(emailNotificationService)
   )
   app.use('/api/prompts', requireAuth, createPromptsRouter(audioPromptService))
   app.use(

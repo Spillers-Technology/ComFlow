@@ -6,6 +6,9 @@ import {
   MfaEnrollResponseSchema,
   MfaStatusSchema,
   SessionGrantSchema,
+  OutboundAccessRequest,
+  OutboundAccessResponseSchema,
+  OutboundStatusSchema,
   PlanBand,
   PlanCatalogResponseSchema,
   PortalResponseSchema,
@@ -498,6 +501,18 @@ export function resendVerification(email: string) {
     '/api/auth/resend-verification',
     { method: 'POST', body: JSON.stringify({ email }) },
     ResendVerificationResponseSchema
+  )
+}
+
+export function getOutboundStatus() {
+  return request('/api/outbound', { method: 'GET' }, OutboundStatusSchema)
+}
+
+export function requestOutboundAccess(payload: OutboundAccessRequest) {
+  return request(
+    '/api/outbound/request',
+    { method: 'POST', body: JSON.stringify(payload) },
+    OutboundAccessResponseSchema
   )
 }
 

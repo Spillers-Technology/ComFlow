@@ -23,6 +23,10 @@ export const TenantLimitsSchema = z.object({
   maxDids: z.number().int(),
   includedMinutes: z.number().int(),
   markupBps: z.number().int(),
+  // Outbound is opt-in and operator-approved, so it is not part of any plan
+  // band — it is a per-tenant grant that survives upgrades and downgrades.
+  // Defaults false: a new tenant must ask, and an operator must agree.
+  outboundEnabled: z.boolean().default(false),
 })
 
 export const UsageSummarySchema = z.object({
@@ -40,6 +44,9 @@ export const UpdateTenantLimitsRequestSchema = z
     maxDids: z.number().int().min(0).max(1000).optional(),
     includedMinutes: z.number().int().min(0).optional(),
     markupBps: z.number().int().min(10000).max(100000).optional(),
+    // Owner-only in practice: the route is already owner-gated, and this is the
+    // switch flipped after the approval call.
+    outboundEnabled: z.boolean().optional(),
   })
   .refine(value => Object.keys(value).length > 0, {
     message: 'At least one field is required.',

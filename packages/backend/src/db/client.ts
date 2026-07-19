@@ -328,6 +328,15 @@ addColumnIfMissing(
   'cancel_at_period_end',
   'INTEGER NOT NULL DEFAULT 0'
 )
+// Outbound calling is opt-in: new tenants start with it off and must ask for
+// it. Defaulting the column to 1 backfills tenants that predate the gate — they
+// already had outbound and should not silently lose it — while
+// tenantLimitsRepository writes 0 for every tenant created from here on.
+addColumnIfMissing(
+  'tenant_limits',
+  'outbound_enabled',
+  'INTEGER NOT NULL DEFAULT 1'
+)
 // Backfill pre-4.0 rows as verified. Unverified self-registered rows always
 // carry a token, so the token guard keeps them out of this backfill.
 db.prepare(`

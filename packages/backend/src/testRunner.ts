@@ -1812,6 +1812,74 @@ async function main() {
     }
   )
 
+  await runTest(
+    'outbound is off by default, survives plan changes, and enforces destinations',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { OutboundGuardService } = await import(
+        './services/outboundGuardService.js'
+      )
+      const { tenantLimitsRepository } = await import(
+        './repositories/tenantLimitsRepository.js'
+      )
+      const { tenantRepository } = await import(
+        './repositories/tenantRepository.js'
+      )
+      const { PLAN_CATALOG } = await import('../../shared/src/index.js')
+
+      ensurePrimaryTenant(config.defaultTenant)
+      const tenant = tenantRepository.create({
+        name: 'Outbound Co',
+        slug: `outbound-${Date.now()}`,
+        plan: 'solo',
+      })
+      const guard = new OutboundGuardService()
+
+      // A brand-new tenant may not dial out.
+      assert.equal(
+        tenantLimitsRepository.get(tenant.id).outboundEnabled,
+        false
+      )
+      assert.throws(
+        () => guard.assertAllowed(tenant.id, '+15551234567'),
+        /not enabled/
+      )
+
+      tenantLimitsRepository.setOutboundEnabled(tenant.id, true)
+      guard.assertAllowed(tenant.id, '+15551234567')
+
+      // Destination rules: NANP only, and nothing that isn't a plain number.
+      assert.throws(
+        () => guard.assertAllowed(tenant.id, '+442071838750'),
+        /not enabled for outbound/
+      )
+      assert.throws(
+        () => guard.assertAllowed(tenant.id, '1-555-123-4567'),
+        /digits only/
+      )
+      assert.throws(
+        () => guard.assertAllowed(tenant.id, 'sip:victim@example.com'),
+        /digits only/
+      )
+
+      // A subscription change re-materializes plan limits; the operator's
+      // outbound grant must not be collateral damage.
+      tenantLimitsRepository.materialize(tenant.id, PLAN_CATALOG.business)
+      assert.equal(tenantLimitsRepository.get(tenant.id).outboundEnabled, true)
+      assert.equal(
+        tenantLimitsRepository.get(tenant.id).maxDids,
+        PLAN_CATALOG.business.maxDids
+      )
+
+      tenantLimitsRepository.setOutboundEnabled(tenant.id, false)
+      assert.throws(
+        () => guard.assertAllowed(tenant.id, '+15551234567'),
+        /not enabled/
+      )
+    }
+  )
+
   const { db } = await getModules()
   db.close()
   fs.rmSync(testDataDir, { recursive: true, force: true })

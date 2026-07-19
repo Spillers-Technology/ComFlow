@@ -301,6 +301,26 @@ export const config = {
     includedMinutes: Number(process.env.COMFLOW_DEFAULT_INCLUDED_MINUTES ?? 0),
     markupBps: Number(process.env.COMFLOW_DEFAULT_MARKUP_BPS ?? 15000),
   },
+  // Outbound calling is the highest-abuse surface: it spends money dialing
+  // arbitrary numbers. These ceilings apply on top of the per-tenant opt-in, so
+  // even an approved tenant cannot run up an unbounded bill in a day.
+  outbound: {
+    maxPerDay: Number(process.env.COMFLOW_OUTBOUND_MAX_PER_DAY ?? 50),
+    maxSpendPerDayCents: Number(
+      process.env.COMFLOW_OUTBOUND_MAX_SPEND_PER_DAY_CENTS ?? 2000
+    ),
+    // Total call duration ceiling, mirroring COMFLOW_INBOUND_MAX_DURATION_SEC.
+    maxDurationSec: Number(
+      process.env.COMFLOW_OUTBOUND_MAX_DURATION_SEC ?? 300
+    ),
+    // E.164 country calling codes that may be dialed. Defaults to NANP (+1),
+    // which covers the US and Canada — where the VoIP.ms DIDs live and where
+    // per-minute rates are predictable. Premium-rate and international
+    // destinations are where toll fraud actually pays, so they stay closed.
+    allowedCallingCodes: readCsvEnv('COMFLOW_OUTBOUND_ALLOWED_CODES').length
+      ? readCsvEnv('COMFLOW_OUTBOUND_ALLOWED_CODES')
+      : ['1'],
+  },
   // The whole-trunk concurrent-call ceiling (e.g. a 10-channel SIP trunk).
   trunkConcurrentCallLimit: Number(process.env.COMFLOW_TRUNK_CHANNELS ?? 10),
   // Raw carrier/AI unit costs in cents, used to meter usage. Owner-tunable.

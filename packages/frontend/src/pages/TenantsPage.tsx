@@ -10,7 +10,9 @@ import {
   Container,
   Divider,
   MenuItem,
+  FormControlLabel,
   Stack,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -122,6 +124,7 @@ export function TenantsPage() {
         maxConcurrentCalls: limits.maxConcurrentCalls,
         includedMinutes: limits.includedMinutes,
         markupBps: limits.markupBps,
+        outboundEnabled: limits.outboundEnabled,
       })
       setLimits(result.limits)
       setNotice('Plan limits saved.')
@@ -355,6 +358,22 @@ export function TenantsPage() {
                     fullWidth
                   />
                 </Stack>
+                {/* Not part of any plan band — this is the switch you flip
+                    after the approval call, and it survives plan changes. */}
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={limits.outboundEnabled}
+                      onChange={event =>
+                        setLimits({
+                          ...limits,
+                          outboundEnabled: event.target.checked,
+                        })
+                      }
+                    />
+                  }
+                  label="Outbound calling enabled"
+                />
                 <Button
                   variant="contained"
                   onClick={() => void handleSaveLimits()}
