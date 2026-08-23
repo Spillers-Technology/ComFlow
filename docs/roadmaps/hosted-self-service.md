@@ -80,6 +80,27 @@ into reviewable, reversible changes.
 change has a bounded rollback and its own tests. No high/critical finding is
 silently carried into the beta.
 
+#### PR #11 decomposition map
+
+PR #11 must be replaced by bounded branches rather than merged and then cleaned
+up. Several units touch `db/client.ts`, `app.ts`, the frontend API client, and the
+backend test runner; those are integration seams, not a reason to recombine the
+features.
+
+| Order | Unit | Includes | Explicitly excludes | Merge gate |
+|---|---|---|---|---|
+| 1 | Identity recovery | Password reset, TOTP enrollment/challenge/recovery, session revocation, email-token primitives | Plans, Stripe, SIP, support/refunds, outbound | Release-container auth matrix plus adversarial token/session review |
+| 2 | Subscription lifecycle | Plan catalog, Stripe Checkout/Portal/webhooks, durable pending-checkout guard, subscription state and limits | Mandatory second wallet payment, support/refunds, SIP packaging, outbound | Complete Stripe test lifecycle and exact reconciliation |
+| 3 | Inbound service enforcement | Subscription grants DID, included allowance grants first DID, real SIP-edge image/config, inbound duration/concurrency enforcement | Scheduled outbound and outbound access requests | Three real disposable signup-to-first-voicemail runs |
+| 4 | Customer lifecycle and operator support | Billing diagnosis, adjustment/refund audit, cancellation, DID release, export/deletion, support signals | New plan tiers or outbound enablement | Tenant-safe lifecycle tests and rehearsed support paths |
+| 5 | Outbound calling | Access request, consent record, country allow-list, spend/count/duration/concurrency enforcement | Any dependency of the inbound launch | Separate abuse/legal review and real outbound evidence; defer by default |
+| 6 | Public copy and release assets | Accurate landing page, pricing, limitations, release notes, image publication | Claims for any unshipped unit | Documentation-freshness check against the tagged release |
+
+The old draft remains useful as a source artifact until each retained hunk has a
+reviewed destination. Close it only after the replacement PRs link back to this
+map and abandoned code is named explicitly; do not let “split” become an
+unreviewed copy of the same change across several branches.
+
 ### M1 — Prove account and money lifecycle in Stripe test mode
 
 **Goal:** A customer can start, recover, change, and stop service without an
