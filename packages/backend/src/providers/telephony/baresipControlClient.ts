@@ -50,14 +50,14 @@ export interface BaresipControlClientOptions {
   reconnectBaseDelayMs?: number
 }
 
-export declare interface BaresipControlClient {
-  on(event: 'event', listener: (event: BaresipEvent) => void): this
-  on(event: 'connect', listener: () => void): this
-  on(event: 'close', listener: () => void): this
-  on(event: 'error', listener: (error: Error) => void): this
+type BaresipControlEvents = {
+  event: [event: BaresipEvent]
+  connect: []
+  close: []
+  error: [error: Error]
 }
 
-export class BaresipControlClient extends EventEmitter {
+export class BaresipControlClient extends EventEmitter<BaresipControlEvents> {
   private socket: net.Socket | null = null
   private buffer = Buffer.alloc(0)
   private readonly pending = new Map<string, PendingCommand>()
