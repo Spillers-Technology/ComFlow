@@ -1,11 +1,16 @@
-import { createHash, randomBytes } from 'node:crypto'
 import {
   RegisterRequest,
   RegisterResponse,
   User,
 } from '../../../shared/src/index.js'
-import { config } from '../config.js'
+import { DEV_SESSION_SECRET, config } from '../config.js'
 import { db } from '../db/client.js'
+import {
+  EmailToken,
+  hashEmailToken,
+  isExpired,
+  newEmailToken,
+} from '../lib/emailToken.js'
 import { HttpError } from '../lib/errors.js'
 import { hashPassword } from '../lib/password.js'
 import { slugify } from '../lib/slug.js'
@@ -25,22 +30,8 @@ type VerificationEmailSender = Pick<
   'sendEmailVerification'
 >
 
-function hashVerificationToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex')
-}
-
-function newVerification(): {
-  rawToken: string
-  tokenHash: string
-  expiresAt: string
-} {
-  const rawToken = randomBytes(32).toString('base64url')
-  const ttlMs = config.selfRegistration.verificationTtlHours * 3_600_000
-  return {
-    rawToken,
-    tokenHash: hashVerificationToken(rawToken),
-    expiresAt: new Date(Date.now() + ttlMs).toISOString(),
-  }
+function newVerification(): EmailToken {
+  return newEmailToken(config.selfRegistration.verificationTtlHours)
 }
 
 // Only a genuine email collision may be reported as "already taken". Every
@@ -90,6 +81,13 @@ export class RegistrationService {
     if (!config.email.notificationsEnabled) {
       throw new Error(
         'Self-registration requires COMFLOW_EMAIL_NOTIFICATIONS_ENABLED=true for email verification.'
+      )
+    }
+    // The dev fallback is public knowledge; on a hosted deployment anyone could
+    // forge a session token for any user id with it.
+    if (config.auth.sessionSecret === DEV_SESSION_SECRET) {
+      throw new Error(
+        'Self-registration requires a non-default AUTH_SESSION_SECRET; session tokens are forgeable with the dev fallback.'
       )
     }
     if (config.selfRegistration.plan !== 'solo') {
@@ -178,7 +176,7 @@ export class RegistrationService {
       'email.verification_sent'
     )
     return {
-      token: signSessionToken(result.record.id),
+      token: signSessionToken(result.record.id, result.record.sessionEpoch),
       user: toApiUser(result.record),
       tenant: result.tenant,
       verificationRequired: true,
@@ -186,13 +184,9 @@ export class RegistrationService {
   }
 
   verifyEmail(token: string): User {
-    const tokenHash = hashVerificationToken(token)
+    const tokenHash = hashEmailToken(token)
     const record = userRepository.getByVerificationTokenHash(tokenHash)
-    if (
-      !record ||
-      !record.emailVerificationExpiresAt ||
-      Date.parse(record.emailVerificationExpiresAt) <= Date.now()
-    ) {
+    if (!record || isExpired(record.emailVerificationExpiresAt)) {
       throw new HttpError(400, 'Invalid or expired verification link.')
     }
 

@@ -2,15 +2,20 @@ import { Router } from 'express'
 import {
   ChangePasswordSchema,
   CreateApiKeyRequestSchema,
+  DisableMfaRequestSchema,
+  MfaConfirmRequestSchema,
   UpdateProfileSchema,
   User,
 } from '../../../shared/src/index.js'
+import { db } from '../db/client.js'
 import { HttpError } from '../lib/errors.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
 import { hashPassword, verifyPassword } from '../lib/password.js'
+import { signSessionToken } from '../lib/token.js'
 import { userRepository } from '../repositories/userRepository.js'
 import { apiKeyService } from '../services/apiKeyService.js'
 import { toApiUser } from '../services/authService.js'
+import { MfaService } from '../services/mfaService.js'
 import { RegistrationService } from '../services/registrationService.js'
 
 function requireCurrentRecord(user: User) {
@@ -27,7 +32,10 @@ function requireParam(value: string | string[] | undefined, label: string) {
   return id
 }
 
-export function createMeRouter(registrationService: RegistrationService) {
+export function createMeRouter(
+  registrationService: RegistrationService,
+  mfaService: MfaService
+) {
   const router = Router()
 
   router.get(
@@ -72,7 +80,63 @@ export function createMeRouter(registrationService: RegistrationService) {
         throw new HttpError(400, 'Current password is incorrect.')
       }
 
-      userRepository.setPassword(existing.id, hashPassword(input.newPassword))
+      // Bumping the epoch signs out every other device. It would sign this one
+      // out too, so hand back a freshly minted token to swap in.
+      db.transaction(() => {
+        userRepository.setPassword(existing.id, hashPassword(input.newPassword))
+        userRepository.bumpSessionEpoch(existing.id)
+      })()
+      const updated = userRepository.getById(existing.id)!
+      response.json({ token: signSessionToken(updated.id, updated.sessionEpoch) })
+    })
+  )
+
+  router.get(
+    '/mfa',
+    asyncHandler((_request, response) => {
+      const existing = requireCurrentRecord(response.locals.user as User)
+      response.json({
+        enabled: Boolean(existing.totpEnabledAt),
+        recoveryCodesRemaining: existing.totpEnabledAt
+          ? existing.totpRecoveryCodes.length
+          : null,
+      })
+    })
+  )
+
+  // Mints a secret to show as a QR code. MFA stays off until /mfa/confirm
+  // proves the authenticator produces valid codes.
+  router.post(
+    '/mfa/enroll',
+    asyncHandler((_request, response) => {
+      const existing = requireCurrentRecord(response.locals.user as User)
+      response.json(mfaService.beginEnrollment(existing.id, 'ComFlow'))
+    })
+  )
+
+  router.post(
+    '/mfa/confirm',
+    asyncHandler((request, response) => {
+      const existing = requireCurrentRecord(response.locals.user as User)
+      const input = parseBody(MfaConfirmRequestSchema, request.body)
+      response.json(mfaService.confirmEnrollment(existing.id, input.code))
+    })
+  )
+
+  // Turning MFA off is a security downgrade, so re-check the password rather
+  // than trusting the session alone.
+  router.delete(
+    '/mfa',
+    asyncHandler((request, response) => {
+      const existing = requireCurrentRecord(response.locals.user as User)
+      const input = parseBody(DisableMfaRequestSchema, request.body)
+      if (
+        existing.passwordHash === null ||
+        !verifyPassword(input.password, existing.passwordHash)
+      ) {
+        throw new HttpError(400, 'Current password is incorrect.')
+      }
+      mfaService.disable(existing.id)
       response.status(204).end()
     })
   )

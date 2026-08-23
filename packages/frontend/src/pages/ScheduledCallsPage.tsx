@@ -23,6 +23,7 @@ import {
   getPrompts,
   getScheduledCalls,
 } from '../lib/api'
+import { OutboundAccessCard } from '../components/OutboundAccessCard'
 
 const STATUS_COLOR: Record<
   ScheduledCall['status'],
@@ -142,6 +143,10 @@ export function ScheduledCallsPage() {
         </Box>
 
         {error && <Alert severity="error">{error}</Alert>}
+
+        {/* Shows the request form when outbound is off, so the gate appears
+            exactly where someone tries to use the feature. */}
+        <OutboundAccessCard />
 
         <Card>
           <CardContent>

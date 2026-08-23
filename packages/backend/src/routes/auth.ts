@@ -1,5 +1,8 @@
 import { Router, urlencoded } from 'express'
 import {
+  CompleteMfaLoginRequestSchema,
+  CompletePasswordResetRequestSchema,
+  ForgotPasswordRequestSchema,
   LoginRequestSchema,
   RegisterRequestSchema,
   ResendVerificationRequestSchema,
@@ -7,16 +10,21 @@ import {
 } from '../../../shared/src/index.js'
 import { config } from '../config.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
-import { verifySessionToken } from '../lib/token.js'
 import { rateLimit } from '../middleware/rateLimit.js'
-import { AuthService } from '../services/authService.js'
+import {
+  AuthService,
+  resolveSessionUser,
+  toApiUser,
+} from '../services/authService.js'
+import { PasswordResetService } from '../services/passwordResetService.js'
 import { RegistrationService } from '../services/registrationService.js'
 import { SsoService } from '../services/ssoService.js'
 
 export function createAuthRouter(
   authService: AuthService,
   ssoService: SsoService,
-  registrationService: RegistrationService
+  registrationService: RegistrationService,
+  passwordResetService: PasswordResetService
 ) {
   const router = Router()
 
@@ -45,12 +53,28 @@ export function createAuthRouter(
     return `${config.auth.ssoSuccessRedirect}#error=${encodeURIComponent(message)}`
   }
 
+  // Limited per IP to slow credential stuffing. Deliberately looser than the
+  // signup limits — a shared office NAT should not lock out real users.
   router.post(
     '/login',
+    rateLimit({ windowMs: 15 * 60_000, max: 20 }),
     asyncHandler(async (request, response) => {
       const input = parseBody(LoginRequestSchema, request.body)
       const result = await authService.login(input.email, input.password)
       response.json(result)
+    })
+  )
+
+  // Second leg of an MFA login. Rate-limited hard: a 6-digit code is only 10^6
+  // of entropy, so unbounded attempts would be brute-forceable.
+  router.post(
+    '/login/mfa',
+    rateLimit({ windowMs: 15 * 60_000, max: 10 }),
+    asyncHandler((request, response) => {
+      const input = parseBody(CompleteMfaLoginRequestSchema, request.body)
+      response.json(
+        authService.completeMfaLogin(input.challengeToken, input.code)
+      )
     })
   )
 
@@ -90,14 +114,37 @@ export function createAuthRouter(
     })
   )
 
+  // Always returns the same response, for the same anti-enumeration reason as
+  // resend-verification. Tightly rate-limited: each accepted call sends mail.
+  router.post(
+    '/forgot-password',
+    rateLimit({ windowMs: 15 * 60_000, max: 5 }),
+    asyncHandler(async (request, response) => {
+      const input = parseBody(ForgotPasswordRequestSchema, request.body)
+      await passwordResetService.request(input.email)
+      response.json({ accepted: true })
+    })
+  )
+
+  // Consumes the emailed reset token and signs every existing session out.
+  router.post(
+    '/reset-password',
+    rateLimit({ windowMs: 15 * 60_000, max: 20 }),
+    asyncHandler((request, response) => {
+      const input = parseBody(CompletePasswordResetRequestSchema, request.body)
+      passwordResetService.reset(input.token, input.password)
+      response.json({ ok: true })
+    })
+  )
+
   // Open endpoint so the client can discover auth state and the current user.
   router.get(
     '/me',
     asyncHandler((request, response) => {
       const header = request.headers.authorization
       const token = header?.startsWith('Bearer ') ? header.slice(7) : null
-      const userId = token ? verifySessionToken(token) : null
-      const user = userId ? authService.getUserById(userId) : null
+      const record = token ? resolveSessionUser(token) : null
+      const user = record ? toApiUser(record) : null
       response.json({
         user,
         authRequired: config.auth.required,

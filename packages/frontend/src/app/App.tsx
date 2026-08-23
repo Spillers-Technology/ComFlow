@@ -22,6 +22,8 @@ import { RegisterPage } from '../pages/RegisterPage'
 import { ScheduledCallsPage } from '../pages/ScheduledCallsPage'
 import { SettingsPage } from '../pages/SettingsPage'
 import { TenantsPage } from '../pages/TenantsPage'
+import { ForgotPasswordPage } from '../pages/ForgotPasswordPage'
+import { ResetPasswordPage } from '../pages/ResetPasswordPage'
 import { VerifyEmailPage } from '../pages/VerifyEmailPage'
 
 function ProtectedShell() {
@@ -70,6 +72,8 @@ function AppGate() {
           }
         />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route
           path="*"
           element={
@@ -89,6 +93,13 @@ function AppGate() {
       <Route path="/login" element={<Navigate to="/calls" replace />} />
       <Route path="/register" element={<Navigate to="/onboarding" replace />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
+      {/* Still reachable while signed in: a reset link mailed to someone who
+          already has a session should work, not bounce them to the inbox. */}
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route
+        path="/forgot-password"
+        element={<Navigate to="/profile" replace />}
+      />
       <Route element={<ProtectedShell />}>
         <Route path="/" element={<Navigate to="/calls" replace />} />
         <Route path="/calls" element={<CallInboxPage />} />
