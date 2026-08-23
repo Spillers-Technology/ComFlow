@@ -292,6 +292,9 @@ spend/channel limits before opening registration.
 
 Two end-to-end playbooks, with copy-paste scripts:
 
+- [Roadmap hosted self-service](docs/roadmaps/hosted-self-service.md) — the
+  staged product, security, real-provider, operations, and customer-evidence
+  gates between today's application flow and a generally available service.
 - [Onboard a team account](docs/runbooks/onboard-team-account.md) — a customer
   org with its own admin and isolated mailboxes/DIDs.
 - [Onboard a paid forward-to user](docs/runbooks/onboard-paid-forward-to-user.md)
