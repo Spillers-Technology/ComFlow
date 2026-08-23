@@ -67,6 +67,23 @@ export const usageRepository = {
     return row.minutes
   },
 
+  /**
+   * Minutes used inside an explicit window. Subscriptions renew on Stripe's
+   * billing period, which rarely aligns with a calendar month, so included
+   * minutes are measured against the period rather than via minutesForMonth.
+   */
+  minutesForPeriod(tenantId: string, startIso: string, endIso: string): number {
+    const row = db
+      .prepare(`
+        SELECT COALESCE(SUM(quantity), 0) AS minutes
+        FROM usage_events
+        WHERE tenant_id = ? AND created_at >= ? AND created_at < ?
+          AND type IN ('inbound_minute', 'outbound_minute')
+      `)
+      .get(tenantId, startIso, endIso) as { minutes: number }
+    return row.minutes
+  },
+
   /** Sum of billed_cents charged to a tenant (all time) — wallet draw-down. */
   totalBilledCents(tenantId: string): number {
     const row = db

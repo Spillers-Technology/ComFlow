@@ -1,4 +1,4 @@
-import { LoginResponse, SsoProviderInfo } from '../../../shared/src/index.js'
+import { SessionGrant, SsoProviderInfo } from '../../../shared/src/index.js'
 import { config } from '../config.js'
 import { ensurePrimaryTenant } from '../db/client.js'
 import { HttpError } from '../lib/errors.js'
@@ -56,7 +56,7 @@ export class SsoService {
   async complete(
     providerId: string,
     input: { callbackUrl?: string; body?: Record<string, unknown>; state: string }
-  ): Promise<LoginResponse> {
+  ): Promise<SessionGrant> {
     const provider = this.getProvider(providerId)
 
     const persisted = ssoStateRepository.consume(input.state)
@@ -99,6 +99,9 @@ export class SsoService {
     }
 
     const refreshed = userRepository.getById(user.id)!
-    return { token: signSessionToken(refreshed.id), user: toApiUser(refreshed) }
+    return {
+      token: signSessionToken(refreshed.id, refreshed.sessionEpoch),
+      user: toApiUser(refreshed),
+    }
   }
 }

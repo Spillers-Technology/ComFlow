@@ -8,8 +8,14 @@ import { BillingProvider } from './types.js'
  * (or explicitly selected), otherwise the in-memory fake for dev/tests.
  */
 export function createBillingProvider(): BillingProvider {
-  const { provider, stripeSecretKey, stripeWebhookSecret, successUrl, cancelUrl } =
-    config.billing
+  const {
+    provider,
+    stripeSecretKey,
+    stripeWebhookSecret,
+    successUrl,
+    cancelUrl,
+    priceIds,
+  } = config.billing
   const stripeConfigured = Boolean(stripeSecretKey)
 
   if (provider === 'stripe' || (provider !== 'fake' && stripeConfigured)) {
@@ -28,6 +34,7 @@ export function createBillingProvider(): BillingProvider {
       webhookSecret: stripeWebhookSecret,
       successUrl,
       cancelUrl,
+      priceIds,
     })
   }
 

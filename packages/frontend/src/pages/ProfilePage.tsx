@@ -27,6 +27,7 @@ import {
   revokeApiKey,
   updateProfile,
 } from '../lib/api'
+import { MfaCard } from '../components/MfaCard'
 
 export function ProfilePage() {
   const { user, authRequired, refresh } = useAuth()
@@ -260,6 +261,8 @@ export function ProfilePage() {
             )}
           </CardContent>
         </Card>
+
+        <MfaCard isLocalAccount={isLocalUser} />
 
         <Card>
           <CardHeader title="API keys" subheader="Use these for MCP access." />

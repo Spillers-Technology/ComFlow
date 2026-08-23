@@ -3,11 +3,19 @@ import { BillingProvider, CheckoutSession, PaymentEvent } from './types.js'
 
 const STRIPE_API = 'https://api.stripe.com/v1'
 
+/** Stripe reports timestamps as epoch seconds; the rest of ComFlow uses ISO. */
+function toIsoSeconds(seconds: number | undefined | null): string | null {
+  if (!seconds) return null
+  return new Date(seconds * 1000).toISOString()
+}
+
 export type StripeConfig = {
   secretKey: string
   webhookSecret: string | null
   successUrl: string
   cancelUrl: string
+  /** Band -> Stripe Price id, so subscription webhooks can resolve the band. */
+  priceIds: Record<string, string | undefined>
 }
 
 /**
@@ -74,6 +82,51 @@ export class StripeBillingProvider implements BillingProvider {
     return { url: String(session.url) }
   }
 
+  async createSubscriptionCheckout(input: {
+    tenantId: string
+    customerId: string
+    band: string
+    priceId: string
+  }): Promise<CheckoutSession> {
+    const session = await this.post('/checkout/sessions', {
+      mode: 'subscription',
+      customer: input.customerId,
+      success_url: this.config.successUrl,
+      cancel_url: this.config.cancelUrl,
+      'metadata[tenantId]': input.tenantId,
+      'metadata[band]': input.band,
+      // Mirrored onto the subscription itself: subscription.* webhooks carry the
+      // subscription's metadata, not the checkout session's.
+      'subscription_data[metadata][tenantId]': input.tenantId,
+      'subscription_data[metadata][band]': input.band,
+      'line_items[0][quantity]': '1',
+      'line_items[0][price]': input.priceId,
+    })
+    return { url: String(session.url) }
+  }
+
+  async createPortalSession(input: {
+    customerId: string
+    returnUrl: string
+  }): Promise<CheckoutSession> {
+    const session = await this.post('/billing_portal/sessions', {
+      customer: input.customerId,
+      return_url: input.returnUrl,
+    })
+    return { url: String(session.url) }
+  }
+
+  async refund(input: {
+    chargeId: string
+    amountCents?: number
+  }): Promise<{ id: string; amountCents: number }> {
+    const refund = await this.post('/refunds', {
+      charge: input.chargeId,
+      ...(input.amountCents ? { amount: String(input.amountCents) } : {}),
+    })
+    return { id: String(refund.id), amountCents: Number(refund.amount ?? 0) }
+  }
+
   private async get(path: string): Promise<Record<string, unknown>> {
     const response = await fetch(`${STRIPE_API}${path}`, {
       headers: { Authorization: `Bearer ${this.config.secretKey}` },
@@ -125,6 +178,71 @@ export class StripeBillingProvider implements BillingProvider {
       }
     }
 
+    if (
+      event.type === 'customer.subscription.created' ||
+      event.type === 'customer.subscription.updated' ||
+      event.type === 'customer.subscription.deleted'
+    ) {
+      const object = event.data.object as {
+        id?: string
+        status?: string
+        customer?: string
+        current_period_start?: number
+        current_period_end?: number
+        cancel_at_period_end?: boolean
+        metadata?: { tenantId?: string; band?: string }
+        items?: { data?: Array<{ price?: { id?: string } }> }
+      }
+      if (!object.id || !object.status) return null
+
+      // Prefer the price id — it is what the customer is actually being charged
+      // for, and it stays correct after a plan change made in the billing
+      // portal, which does not rewrite the subscription's metadata.
+      const priceId = object.items?.data?.[0]?.price?.id
+      const band =
+        this.bandForPrice(priceId) ?? object.metadata?.band ?? null
+
+      return {
+        id: event.id,
+        type: 'subscription_updated',
+        tenantId: object.metadata?.tenantId,
+        customerId: object.customer ? String(object.customer) : undefined,
+        subscription: {
+          stripeSubscriptionId: object.id,
+          // A deleted subscription may still report 'active' in its payload;
+          // the event type is the authoritative signal that it is over.
+          status:
+            event.type === 'customer.subscription.deleted'
+              ? 'canceled'
+              : object.status,
+          band,
+          currentPeriodStart: toIsoSeconds(object.current_period_start),
+          currentPeriodEnd: toIsoSeconds(object.current_period_end),
+          cancelAtPeriodEnd: Boolean(object.cancel_at_period_end),
+        },
+      }
+    }
+
+    // Stripe stops retrying and fires this once the whole retry schedule is
+    // exhausted, which is the point at which suspending is proportionate.
+    if (event.type === 'invoice.payment_failed') {
+      const invoice = event.data.object as {
+        customer?: string
+        next_payment_attempt?: number | null
+        subscription?: string
+      }
+      // Retries remain: the subscription is past_due, which still grants
+      // service. Wait for Stripe to give up before acting.
+      if (invoice.next_payment_attempt) return null
+      if (!invoice.customer) return null
+
+      return {
+        id: event.id,
+        type: 'subscription_payment_failed',
+        customerId: String(invoice.customer),
+      }
+    }
+
     if (event.type === 'charge.dispute.created') {
       const dispute = event.data.object as {
         charge?: string
@@ -145,6 +263,14 @@ export class StripeBillingProvider implements BillingProvider {
       }
     }
 
+    return null
+  }
+
+  private bandForPrice(priceId: string | undefined): string | null {
+    if (!priceId) return null
+    for (const [band, configured] of Object.entries(this.config.priceIds)) {
+      if (configured && configured === priceId) return band
+    }
     return null
   }
 

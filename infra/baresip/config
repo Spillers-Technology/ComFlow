@@ -19,7 +19,11 @@ snd_path                /data/recordings-raw
 record_aufile           yes
 
 # --- RTP media ports (publish/forward these for media to flow) ---
-rtp_ports               16384-16584
+# Two ports per call (RTP + RTCP), so this covers 10 concurrent calls — matching
+# the default COMFLOW_TRUNK_CHANNELS ceiling. Kept deliberately narrow because
+# Kubernetes Services cannot express a port range: every port here has to be
+# listed individually in the LoadBalancer manifest and the NAT rule.
+rtp_ports               16384-16403
 
 # --- Modules ---
 module_path             /usr/local/lib/baresip/modules

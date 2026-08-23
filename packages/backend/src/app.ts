@@ -12,6 +12,7 @@ import { createGroupsRouter } from './routes/groups.js'
 import { createHealthRouter } from './routes/health.js'
 import { createMailboxesRouter } from './routes/mailboxes.js'
 import { createMeRouter } from './routes/me.js'
+import { createOutboundRouter } from './routes/outbound.js'
 import { createPromptsRouter } from './routes/prompts.js'
 import { createScheduledCallsRouter } from './routes/scheduledCalls.js'
 import { createSettingsRouter } from './routes/settings.js'
@@ -39,6 +40,8 @@ import { UsageService } from './services/usageService.js'
 import { EmailNotificationService } from './services/emailNotificationService.js'
 import { EngineService } from './services/engineService.js'
 import { MailboxService } from './services/mailboxService.js'
+import { MfaService } from './services/mfaService.js'
+import { PasswordResetService } from './services/passwordResetService.js'
 import { RegistrationService } from './services/registrationService.js'
 import { ScheduledCallService } from './services/scheduledCallService.js'
 import { SsoService } from './services/ssoService.js'
@@ -68,9 +71,11 @@ export function createApp() {
     billingService
   )
   const callReviewService = new CallReviewService()
-  const authService = new AuthService()
+  const mfaService = new MfaService()
+  const authService = new AuthService(undefined, mfaService)
   const ssoService = new SsoService()
   const registrationService = new RegistrationService(emailNotificationService)
+  const passwordResetService = new PasswordResetService(emailNotificationService)
   registrationService.assertConfiguration()
   billingService.assertHostedConfiguration()
   // Ensure the primary tenant exists and back-fill pre-tenancy rows onto it,
@@ -398,7 +403,12 @@ export function createApp() {
   app.use('/api/health', createHealthRouter(engineService))
   app.use(
     '/api/auth',
-    createAuthRouter(authService, ssoService, registrationService)
+    createAuthRouter(
+      authService,
+      ssoService,
+      registrationService,
+      passwordResetService
+    )
   )
   app.use(
     '/api/webhooks',
@@ -414,7 +424,16 @@ export function createApp() {
     createSettingsRouter(engineService, baresipManagementService)
   )
   app.use('/api/calls', requireAuth, createCallsRouter(callReviewService))
-  app.use('/api/me', requireAuth, createMeRouter(registrationService))
+  app.use(
+    '/api/me',
+    requireAuth,
+    createMeRouter(registrationService, mfaService)
+  )
+  app.use(
+    '/api/outbound',
+    requireAuth,
+    createOutboundRouter(emailNotificationService)
+  )
   app.use('/api/prompts', requireAuth, createPromptsRouter(audioPromptService))
   app.use(
     '/api/scheduled-calls',
@@ -431,7 +450,7 @@ export function createApp() {
   app.use('/api/users', requireAuth, requireAdmin, createUsersRouter())
   app.use('/api/usage', requireAuth, createUsageRouter(usageService))
   app.use('/api/billing', requireAuth, createBillingRouter(billingService))
-  app.use('/api/tenants', requireAuth, createTenantsRouter())
+  app.use('/api/tenants', requireAuth, createTenantsRouter(billingService))
 
   // Serve the built frontend (production single-image deploy). API routes above
   // win; everything else falls back to the SPA entry point.

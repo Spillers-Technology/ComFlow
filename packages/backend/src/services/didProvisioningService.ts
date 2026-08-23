@@ -43,6 +43,9 @@ export class DidProvisioningService {
   ): Promise<ProvisionedDid> {
     // Frozen tenants (chargeback/owner action) may not order numbers.
     assertTenantActive(tenantId)
+    // Wallet credit is usage funding, not a substitute for the recurring plan
+    // that grants access to provider resources.
+    this.billingService.assertSubscriptionGrantsService(tenantId)
     // Reserve a finite plan slot synchronously before awaiting the provider, so
     // concurrent requests cannot both pass the cap and incur carrier cost.
     const limits = tenantLimitsRepository.get(tenantId)

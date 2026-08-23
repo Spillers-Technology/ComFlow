@@ -115,6 +115,66 @@ export class EmailNotificationService {
     return true
   }
 
+  async sendPasswordReset(
+    email: string,
+    token: string,
+    ttlHours: number
+  ): Promise<boolean> {
+    if (!config.email.notificationsEnabled) return false
+
+    const base = config.email.publicUrl.replace(/\/$/, '')
+    const link = `${base}/reset-password?token=${encodeURIComponent(token)}`
+    await this.transport.sendMail({
+      from: config.email.from,
+      to: email,
+      subject: '[ComFlow] Reset your password',
+      text: [
+        'Someone asked to reset the ComFlow password for this address.',
+        '',
+        `Set a new password (link expires in ${ttlHours} hour${
+          ttlHours === 1 ? '' : 's'
+        }):`,
+        '',
+        link,
+        '',
+        'If this was not you, ignore this message — your password is unchanged.',
+      ].join('\n'),
+    })
+    return true
+  }
+
+  /** Operator alert: a customer is asking to have outbound calling turned on. */
+  async sendOutboundAccessRequest(input: {
+    tenantName: string
+    tenantId: string
+    requestedBy: string
+    useCase: string
+    contactPhone: string
+  }): Promise<boolean> {
+    if (!config.email.notificationsEnabled || config.email.to.length === 0) {
+      return false
+    }
+    await this.transport.sendMail({
+      from: config.email.from,
+      to: config.email.to.join(', '),
+      subject: `[ComFlow] Outbound access requested — ${input.tenantName}`,
+      text: [
+        `${input.requestedBy} is asking for outbound calling.`,
+        '',
+        `Tenant:  ${input.tenantName} (${input.tenantId})`,
+        `Contact: ${input.contactPhone}`,
+        '',
+        'Stated use case:',
+        input.useCase,
+        '',
+        'They have attested that they have consent to call the people they',
+        'intend to reach. Call them back, then enable outbound on the Tenants',
+        'page if it checks out.',
+      ].join('\n'),
+    })
+    return true
+  }
+
   /** Operator alert: a tenant was automatically frozen (e.g. chargeback). */
   async sendTenantFrozenAlert(input: {
     tenantName: string

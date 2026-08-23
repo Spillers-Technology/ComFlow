@@ -11,6 +11,7 @@ import {
 } from '../../../shared/src/index.js'
 import {
   getMe,
+  completeMfaLogin as apiCompleteMfaLogin,
   login as apiLogin,
   register as apiRegister,
   setToken,
@@ -73,9 +74,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void refresh()
   }, [refresh])
 
+  /**
+   * Resolves to a challenge token when the account has MFA enabled; the caller
+   * then collects a code and calls completeMfaLogin. Returns null when the
+   * sign-in is already complete.
+   */
   const login = useCallback(
-    async (email: string, password: string) => {
+    async (email: string, password: string): Promise<string | null> => {
       const result = await apiLogin({ email, password })
+      if ('mfaRequired' in result) return result.challengeToken
+      setToken(result.token)
+      setUser(result.user)
+      return null
+    },
+    []
+  )
+
+  const completeMfaLogin = useCallback(
+    async (challengeToken: string, code: string) => {
+      const result = await apiCompleteMfaLogin({ challengeToken, code })
       setToken(result.token)
       setUser(result.user)
     },
@@ -112,6 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ssoError,
       loading,
       login,
+      completeMfaLogin,
       register,
       verifyEmail,
       logout,
@@ -126,6 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ssoError,
       loading,
       login,
+      completeMfaLogin,
       register,
       verifyEmail,
       logout,
