@@ -42,6 +42,7 @@ function toApi(record: ScheduledCallRecord): ScheduledCall {
 export class ScheduledCallService {
   private timer: NodeJS.Timeout | null = null
   private running = false
+  private currentTick: Promise<void> | null = null
 
   constructor(
     private readonly engineService: EngineService,
@@ -102,15 +103,19 @@ export class ScheduledCallService {
   startScheduler() {
     if (this.timer) return
     this.timer = setInterval(() => {
-      void this.tick()
+      if (this.currentTick) return
+      this.currentTick = this.tick().finally(() => {
+        this.currentTick = null
+      })
     }, config.telephony.schedulerIntervalSec * 1000)
   }
 
-  stopScheduler() {
+  async stopScheduler(): Promise<void> {
     if (this.timer) {
       clearInterval(this.timer)
       this.timer = null
     }
+    await this.currentTick
   }
 
   private async tick() {

@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { loadEnvFile } from './lib/envFile.js'
 import { createSilentWav } from './lib/audio.js'
 
@@ -1357,6 +1359,98 @@ async function main() {
       assert.deepEqual(meBody.providers, [])
     })
   })
+
+  await runTest(
+    'production server drains on SIGTERM and leaves SQLite consistent',
+    async () => {
+      const childDataDir = fs.mkdtempSync(
+        path.join(os.tmpdir(), 'comflow-shutdown-test-')
+      )
+      const serverPath = fileURLToPath(new URL('./server.js', import.meta.url))
+      const child = spawn(process.execPath, [serverPath], {
+        env: {
+          ...process.env,
+          PORT: '0',
+          COMFLOW_DATA_DIR: childDataDir,
+          BARESIP_ACCOUNTS_PATH: path.join(
+            childDataDir,
+            'baresip',
+            'accounts'
+          ),
+          COMFLOW_SEED_DEMO: 'false',
+          COMFLOW_AUTH_REQUIRED: 'false',
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      let stdout = ''
+      let stderr = ''
+      child.stdout.setEncoding('utf8')
+      child.stderr.setEncoding('utf8')
+      child.stdout.on('data', chunk => {
+        stdout += String(chunk)
+      })
+      child.stderr.on('data', chunk => {
+        stderr += String(chunk)
+      })
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(
+            () => reject(new Error(`server did not become ready: ${stderr}`)),
+            5_000
+          )
+          const check = () => {
+            if (!stdout.includes('ComFlow backend listening on')) return
+            clearTimeout(timeout)
+            child.stdout.off('data', check)
+            resolve()
+          }
+          child.stdout.on('data', check)
+          check()
+        })
+
+        const exited = once(child, 'exit')
+        const startedAt = Date.now()
+        assert.equal(child.kill('SIGTERM'), true)
+        let exitTimeout: NodeJS.Timeout | undefined
+        const [code, signal] = (await Promise.race([
+          exited,
+          new Promise<never>((_resolve, reject) => {
+            exitTimeout = setTimeout(
+              () => reject(new Error(`SIGTERM did not exit: ${stdout} ${stderr}`)),
+              5_000
+            )
+          }),
+        ])) as [number | null, NodeJS.Signals | null]
+        if (exitTimeout) clearTimeout(exitTimeout)
+        assert.equal(code, 0)
+        assert.equal(signal, null)
+        assert.ok(Date.now() - startedAt < 5_000)
+        assert.match(stdout, /Received SIGTERM; draining ComFlow/)
+        assert.match(stdout, /ComFlow shutdown complete/)
+
+        const Database = (await import('better-sqlite3')).default
+        const restored = new Database(
+          path.join(childDataDir, 'comflow.db'),
+          { readonly: true }
+        )
+        try {
+          const integrity = restored.pragma('integrity_check', {
+            simple: true,
+          }) as string
+          assert.equal(integrity, 'ok')
+        } finally {
+          restored.close()
+        }
+      } finally {
+        if (child.exitCode === null && child.signalCode === null) {
+          child.kill('SIGKILL')
+          await once(child, 'exit')
+        }
+        fs.rmSync(childDataDir, { recursive: true, force: true })
+      }
+    }
+  )
 
   await runTest('groups can be created and granted mailboxes', async () => {
     await withServer(async baseUrl => {

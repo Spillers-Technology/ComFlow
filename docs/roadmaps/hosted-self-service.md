@@ -107,9 +107,12 @@ replayable five-minute login challenges, no protection against reusing a TOTP
 within its accepted time step, and a concurrent recovery-code reuse edge. Unit
 1B must close those failure modes rather than copying the existing hunks.
 
-Release-container discovery also found that the process did not exit within a
-10-second SIGTERM grace period and was killed. Graceful shutdown of HTTP work,
-SQLite writes, and provider operations is now part of M3 recovery evidence.
+The release-container recovery drill found that ComFlow did not exit inside a
+10-second SIGTERM grace period and was killed. The bounded shutdown fix stops
+schedulers and SIP reconnects, drains HTTP, checkpoints/closes SQLite, and has
+both a spawned-server SIGTERM regression and a Node 20 release-container
+exit-0/integrity proof. This closes the observed process-exit defect; it does
+not substitute for the later backup/restore or live in-flight SIP drills.
 
 ### M1 — Prove account and money lifecycle in Stripe test mode
 
