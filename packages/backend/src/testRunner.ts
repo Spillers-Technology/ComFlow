@@ -1901,6 +1901,29 @@ async function main() {
         assert.equal(resolveSessionUser(oldSession), null)
         assert.equal(mfa.recoveryCodeCount(user.id), 10)
 
+        // Defense in depth at the repository boundary: even a stale caller
+        // that observed MFA as disabled cannot overwrite a factor that became
+        // live before its write. This guards the exact enrollment race found
+        // during the audit independently of MfaService's transaction lock.
+        const protectedRecord = userRepository.getById(user.id)!
+        assert.equal(
+          userRepository.setMfaEnrollment(user.id, {
+            encryptedSecret: 'stale-enrollment-must-not-land',
+            expiresAt: new Date(Date.now() + 60_000).toISOString(),
+          }),
+          false
+        )
+        const afterStaleEnrollment = userRepository.getById(user.id)!
+        assert.equal(
+          afterStaleEnrollment.totpSecretEncrypted,
+          protectedRecord.totpSecretEncrypted
+        )
+        assert.equal(
+          afterStaleEnrollment.totpEnabledAt,
+          protectedRecord.totpEnabledAt
+        )
+        assert.equal(mfa.recoveryCodeCount(user.id), 10)
+
         const challenged = await auth.login(
           user.email,
           'correct-horse-battery-staple'

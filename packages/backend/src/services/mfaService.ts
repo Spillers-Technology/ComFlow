@@ -41,10 +41,13 @@ export class MfaService {
       if (current.totpEnabledAt) {
         throw new HttpError(409, 'Two-factor authentication is already enabled.')
       }
-      userRepository.setMfaEnrollment(current.id, {
+      const reserved = userRepository.setMfaEnrollment(current.id, {
         encryptedSecret: encryptMfaSecret(secret),
         expiresAt,
       })
+      if (!reserved) {
+        throw new HttpError(409, 'Two-factor authentication is already enabled.')
+      }
       mfaRepository.removeRecoveryCodes(current.id)
       auditRepository.record({
         actor: current.id,

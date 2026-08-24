@@ -239,18 +239,19 @@ export const userRepository = {
   setMfaEnrollment(
     id: string,
     input: { encryptedSecret: string; expiresAt: string }
-  ): void {
-    db.prepare(`
+  ): boolean {
+    const result = db.prepare(`
       UPDATE users
       SET totp_secret_encrypted = ?, totp_enrollment_expires_at = ?,
           totp_enabled_at = NULL, totp_last_counter = NULL, updated_at = ?
-      WHERE id = ?
+      WHERE id = ? AND totp_enabled_at IS NULL
     `).run(
       input.encryptedSecret,
       input.expiresAt,
       new Date().toISOString(),
       id
     )
+    return result.changes === 1
   },
 
   enableMfa(id: string, acceptedCounter: number): void {
