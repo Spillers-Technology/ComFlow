@@ -35,6 +35,7 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false)
   const [challengeToken, setChallengeToken] = useState<string | null>(null)
   const [mfaCode, setMfaCode] = useState('')
+  const [recoveryMode, setRecoveryMode] = useState(false)
 
   function goToApp() {
     const from = (location.state as { from?: string } | null)?.from
@@ -84,15 +85,17 @@ export function LoginPage() {
                 Two-factor code
               </Typography>
               <Typography color="text.secondary">
-                Enter the code from your authenticator or one unused recovery code.
+                {recoveryMode
+                  ? 'Enter one unused recovery code.'
+                  : 'Enter the 6-digit code from your authenticator.'}
               </Typography>
               {error && <Alert severity="error">{error}</Alert>}
               <TextField
-                label="Verification code"
+                label={recoveryMode ? 'Recovery code' : 'Authenticator code'}
                 value={mfaCode}
                 onChange={event => setMfaCode(event.target.value)}
                 autoComplete="one-time-code"
-                inputMode="numeric"
+                inputMode={recoveryMode ? 'text' : 'numeric'}
                 autoFocus
                 required
                 fullWidth
@@ -103,8 +106,21 @@ export function LoginPage() {
               <Button
                 variant="text"
                 onClick={() => {
+                  setRecoveryMode(value => !value)
+                  setMfaCode('')
+                  setError(null)
+                }}
+              >
+                {recoveryMode
+                  ? 'Use an authenticator code'
+                  : 'Use a recovery code'}
+              </Button>
+              <Button
+                variant="text"
+                onClick={() => {
                   setChallengeToken(null)
                   setMfaCode('')
+                  setRecoveryMode(false)
                   setError(null)
                 }}
               >

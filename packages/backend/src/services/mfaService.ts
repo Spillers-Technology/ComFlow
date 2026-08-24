@@ -30,24 +30,28 @@ function generateRecoveryCodes(): string[] {
 
 export class MfaService {
   beginEnrollment(userId: string, password: string) {
-    const record = this.requireLocalUser(userId)
-    this.requirePassword(record, password)
-    if (record.totpEnabledAt) {
-      throw new HttpError(409, 'Two-factor authentication is already enabled.')
-    }
     const secret = generateTotpSecret()
     const expiresAt = new Date(Date.now() + ENROLLMENT_TTL_MS).toISOString()
-    db.transaction(() => {
-      userRepository.setMfaEnrollment(record.id, {
+    const record = db.transaction(() => {
+      // Hold the write lock while re-reading the password and MFA state. An
+      // enrollment request that started before another request enabled MFA
+      // must not wake up afterward and silently replace/disable that factor.
+      const current = this.requireLocalUser(userId)
+      this.requirePassword(current, password)
+      if (current.totpEnabledAt) {
+        throw new HttpError(409, 'Two-factor authentication is already enabled.')
+      }
+      userRepository.setMfaEnrollment(current.id, {
         encryptedSecret: encryptMfaSecret(secret),
         expiresAt,
       })
-      mfaRepository.removeRecoveryCodes(record.id)
+      mfaRepository.removeRecoveryCodes(current.id)
       auditRepository.record({
-        actor: record.id,
+        actor: current.id,
         action: 'mfa.enrollment_started',
-        tenantId: record.tenantId,
+        tenantId: current.tenantId,
       })
+      return current
     }).immediate()
     return {
       secret,

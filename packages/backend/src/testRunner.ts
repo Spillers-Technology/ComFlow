@@ -2068,11 +2068,13 @@ async function main() {
         localEnabled: config.auth.localEnabled,
         emailEnabled: config.email.notificationsEnabled,
         sessionSecret: config.auth.sessionSecret,
+        mfaEncryptionKey: config.auth.mfaEncryptionKey,
       }
       config.auth.required = true
       config.auth.localEnabled = true
       config.email.notificationsEnabled = true
       config.auth.sessionSecret = 'admin-reset-integration-secret-32-bytes'
+      config.auth.mfaEncryptionKey = 'admin-reset-mfa-encryption-key-32-bytes'
 
       try {
         const tenantId = ensurePrimaryTenant(config.defaultTenant)
@@ -2134,6 +2136,7 @@ async function main() {
         config.auth.localEnabled = previous.localEnabled
         config.email.notificationsEnabled = previous.emailEnabled
         config.auth.sessionSecret = previous.sessionSecret
+        config.auth.mfaEncryptionKey = previous.mfaEncryptionKey
       }
     }
   )
