@@ -69,6 +69,7 @@ export class BaresipControlClient extends EventEmitter<BaresipControlEvents> {
   private readonly port: number
   private readonly commandTimeoutMs: number
   private readonly reconnectBaseDelayMs: number
+  private reconnectTimer: NodeJS.Timeout | null = null
 
   constructor(options: BaresipControlClientOptions) {
     super()
@@ -89,6 +90,10 @@ export class BaresipControlClient extends EventEmitter<BaresipControlEvents> {
 
   stop() {
     this.stopped = true
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     this.socket?.destroy()
     this.socket = null
     this.connected = false
@@ -159,7 +164,10 @@ export class BaresipControlClient extends EventEmitter<BaresipControlEvents> {
       this.reconnectBaseDelayMs * 2 ** (this.reconnectAttempts - 1),
       30_000
     )
-    setTimeout(() => this.connect(), delay)
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      this.connect()
+    }, delay)
   }
 
   private onData(chunk: Buffer) {

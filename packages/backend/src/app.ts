@@ -1,7 +1,7 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import cors from 'cors'
-import express, { NextFunction, Request, Response } from 'express'
+import express, { Express, NextFunction, Request, Response } from 'express'
 import { User } from '../../shared/src/index.js'
 import { createComflowMcpRouter } from '../../mcp/src/index.js'
 import { createAuthRouter } from './routes/auth.js'
@@ -20,7 +20,7 @@ import { createUsageRouter } from './routes/usage.js'
 import { createUsersRouter } from './routes/users.js'
 import { createWebhookRouter } from './routes/webhooks.js'
 import { config } from './config.js'
-import { ensurePrimaryTenant } from './db/client.js'
+import { db, ensurePrimaryTenant } from './db/client.js'
 import { HttpError } from './lib/errors.js'
 import { hashPassword } from './lib/password.js'
 import { requireAdmin } from './middleware/requireAdmin.js'
@@ -50,8 +50,13 @@ import { userRepository } from './repositories/userRepository.js'
 import { accessService } from './services/accessService.js'
 import { toApiUser } from './services/authService.js'
 
-export function createApp() {
-  const app = express()
+export type ComFlowApp = Express & {
+  stopBackground: () => Promise<void>
+  closeStorage: () => void
+}
+
+export function createApp(): ComFlowApp {
+  const app = express() as ComFlowApp
   if (config.trustProxy) app.set('trust proxy', 1)
   const telephonyProvider = new FakeTelephonyProvider()
   const engineService = new EngineService()
@@ -358,15 +363,50 @@ export function createApp() {
   // Charge each active DID's monthly rental (idempotent per number per month),
   // now and once a day, so wallets reflect rental between usage-page reads.
   usageService.sweepDidRentals()
-  setInterval(() => usageService.sweepDidRentals(), 24 * 60 * 60 * 1000).unref()
-  void billingService.flushPendingAlerts().catch(error => {
-    console.error(`Failed to deliver pending billing alert: ${error.message}`)
-  })
-  setInterval(() => {
-    void billingService.flushPendingAlerts().catch(error => {
-      console.error(`Failed to deliver pending billing alert: ${error.message}`)
-    })
-  }, 5 * 60 * 1000).unref()
+  const rentalTimer = setInterval(
+    () => usageService.sweepDidRentals(),
+    24 * 60 * 60 * 1000
+  )
+  rentalTimer.unref()
+  let alertFlush: Promise<void> | null = null
+  function flushAlerts() {
+    if (alertFlush) return
+    alertFlush = billingService
+      .flushPendingAlerts()
+      .catch(error => {
+        console.error(`Failed to deliver pending billing alert: ${error.message}`)
+      })
+      .finally(() => {
+        alertFlush = null
+      })
+  }
+  flushAlerts()
+  const alertTimer = setInterval(() => {
+    flushAlerts()
+  }, 5 * 60 * 1000)
+  alertTimer.unref()
+
+  let backgroundStopped = false
+  app.stopBackground = async () => {
+    if (backgroundStopped) return
+    backgroundStopped = true
+    clearInterval(rentalTimer)
+    clearInterval(alertTimer)
+    telephonyGateway.stop()
+    await scheduledCallService.stopScheduler()
+    await alertFlush
+  }
+
+  let storageClosed = false
+  app.closeStorage = () => {
+    if (storageClosed) return
+    storageClosed = true
+    try {
+      db.pragma('wal_checkpoint(TRUNCATE)')
+    } finally {
+      db.close()
+    }
+  }
 
   app.use(
     cors({

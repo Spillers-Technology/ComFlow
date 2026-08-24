@@ -101,6 +101,13 @@ reviewed destination. Close it only after the replacement PRs link back to this
 map and abandoned code is named explicitly; do not let “split” become an
 unreviewed copy of the same change across several branches.
 
+The release-container recovery drill found that ComFlow did not exit inside a
+10-second SIGTERM grace period and was killed. The bounded shutdown fix stops
+schedulers and SIP reconnects, drains HTTP, checkpoints/closes SQLite, and has
+both a spawned-server SIGTERM regression and a Node 20 release-container
+exit-0/integrity proof. This closes the observed process-exit defect; it does
+not substitute for the later backup/restore or live in-flight SIP drills.
+
 ### M1 — Prove account and money lifecycle in Stripe test mode
 
 **Goal:** A customer can start, recover, change, and stop service without an
