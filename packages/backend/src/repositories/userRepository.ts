@@ -341,10 +341,15 @@ export const userRepository = {
     return this.getById(id)
   },
 
-  setPassword(id: string, passwordHash: string): void {
-    db.prepare(
-      'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?'
-    ).run(passwordHash, new Date().toISOString(), id)
+  /** Replace the password and invalidate every older session/reset grant. */
+  replacePassword(id: string, passwordHash: string): void {
+    db.prepare(`
+      UPDATE users
+      SET password_hash = ?, password_reset_token = NULL,
+          password_reset_expires_at = NULL,
+          session_epoch = session_epoch + 1, updated_at = ?
+      WHERE id = ?
+    `).run(passwordHash, new Date().toISOString(), id)
   },
 
   remove(id: string): boolean {

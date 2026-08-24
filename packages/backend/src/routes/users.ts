@@ -6,8 +6,11 @@ import {
   User,
 } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
+import { db } from '../db/client.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
 import { hashPassword } from '../lib/password.js'
+import { apiKeyRepository } from '../repositories/apiKeyRepository.js'
+import { auditRepository } from '../repositories/auditRepository.js'
 import { userRepository } from '../repositories/userRepository.js'
 import { toApiUser } from '../services/authService.js'
 
@@ -81,9 +84,18 @@ export function createUsersRouter() {
     asyncHandler((request, response) => {
       const current = response.locals.user as User
       const id = requireParam(request.params.id, 'User id')
-      requireUserInTenant(id, current.tenantId)
+      const existing = requireUserInTenant(id, current.tenantId)
       const input = parseBody(ResetPasswordRequestSchema, request.body)
-      userRepository.setPassword(id, hashPassword(input.password))
+      db.transaction(() => {
+        userRepository.replacePassword(id, hashPassword(input.password))
+        const apiKeysRevoked = apiKeyRepository.removeAllForUser(id)
+        auditRepository.record({
+          actor: current.id,
+          action: 'user.password_reset_by_admin',
+          tenantId: existing.tenantId,
+          detail: { userId: id, apiKeysRevoked },
+        })
+      })()
       response.status(204).end()
     })
   )

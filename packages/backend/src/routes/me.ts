@@ -83,8 +83,10 @@ export function createMeRouter(
       }
 
       db.transaction(() => {
-        userRepository.setPassword(existing.id, hashPassword(input.newPassword))
-        userRepository.bumpSessionEpoch(existing.id)
+        userRepository.replacePassword(
+          existing.id,
+          hashPassword(input.newPassword)
+        )
         auditRepository.record({
           actor: existing.id,
           action: 'password.changed',
