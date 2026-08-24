@@ -107,6 +107,14 @@ replayable five-minute login challenges, no protection against reusing a TOTP
 within its accepted time step, and a concurrent recovery-code reuse edge. Unit
 1B must close those failure modes rather than copying the existing hunks.
 
+Unit 1B is now in implementation as a stacked draft: opaque challenge tokens
+are stored only as hashes in durable SQLite rows, challenge attempts and
+consumption use immediate write transactions, accepted TOTP counters are
+persisted against replay, and recovery codes are independent hashed rows whose
+successful use is an atomic delete. TOTP seeds are encrypted at rest. This is
+implementation evidence, not a release-gate pass until the authenticator,
+recovery, concurrency, release-container, and UI matrices are recorded.
+
 Release-container discovery also found that the process did not exit within a
 10-second SIGTERM grace period and was killed. Graceful shutdown of HTTP work,
 SQLite writes, and provider operations is now part of M3 recovery evidence.

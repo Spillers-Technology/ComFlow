@@ -15,7 +15,9 @@ export interface AuthState {
   providers: SsoProviderInfo[]
   ssoError: string | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
+  /** Returns an opaque MFA challenge when a second factor is still owed. */
+  login: (email: string, password: string) => Promise<string | null>
+  completeMfaLogin: (challengeToken: string, code: string) => Promise<void>
   register: (input: RegisterRequest) => Promise<RegisterResponse>
   verifyEmail: (token: string) => Promise<User>
   logout: () => void

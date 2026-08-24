@@ -1,4 +1,8 @@
-import { LoginResponse, User } from '../../../shared/src/index.js'
+import {
+  LoginResponse,
+  SessionGrant,
+  User,
+} from '../../../shared/src/index.js'
 import { config, isSecureSessionSecret } from '../config.js'
 import { ensurePrimaryTenant } from '../db/client.js'
 import { HttpError } from '../lib/errors.js'
@@ -7,6 +11,7 @@ import { signSessionToken, verifySessionToken } from '../lib/token.js'
 import { LocalAuthProvider } from '../providers/auth/local.js'
 import { AuthProvider } from '../providers/auth/types.js'
 import { UserRecord, userRepository } from '../repositories/userRepository.js'
+import { MfaService } from './mfaService.js'
 
 export function toApiUser(record: UserRecord): User {
   return {
@@ -30,7 +35,8 @@ export function resolveSessionUser(token: string): UserRecord | null {
 
 export class AuthService {
   constructor(
-    private readonly provider: AuthProvider = new LocalAuthProvider()
+    private readonly provider: AuthProvider = new LocalAuthProvider(),
+    private readonly mfaService: MfaService = new MfaService()
   ) {}
 
   /** Fail closed before accepting traffic with a publicly forgeable session key. */
@@ -39,6 +45,11 @@ export class AuthService {
     if (!isSecureSessionSecret(config.auth.sessionSecret)) {
       throw new Error(
         'Authentication requires a non-placeholder AUTH_SESSION_SECRET of at least 32 bytes.'
+      )
+    }
+    if (!isSecureSessionSecret(config.auth.mfaEncryptionKey)) {
+      throw new Error(
+        'Authentication requires COMFLOW_MFA_ENCRYPTION_KEY (or its AUTH_SESSION_SECRET fallback) to be non-placeholder and at least 32 bytes.'
       )
     }
     if (
@@ -76,9 +87,23 @@ export class AuthService {
     }
     const record = userRepository.getById(user.id)
     if (!record) throw new HttpError(401, 'Invalid email or password.')
+    if (record.totpEnabledAt) {
+      return {
+        mfaRequired: true,
+        challengeToken: this.mfaService.createLoginChallenge(record),
+      }
+    }
     return {
       token: signSessionToken(user.id, record.sessionEpoch),
       user,
+    }
+  }
+
+  completeMfaLogin(challengeToken: string, code: string): SessionGrant {
+    const record = this.mfaService.completeLoginChallenge(challengeToken, code)
+    return {
+      token: signSessionToken(record.id, record.sessionEpoch),
+      user: toApiUser(record),
     }
   }
 

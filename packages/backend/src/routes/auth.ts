@@ -1,5 +1,6 @@
 import { Router, urlencoded } from 'express'
 import {
+  CompleteMfaLoginRequestSchema,
   CompletePasswordResetRequestSchema,
   ForgotPasswordRequestSchema,
   LoginRequestSchema,
@@ -60,6 +61,17 @@ export function createAuthRouter(
       const input = parseBody(LoginRequestSchema, request.body)
       const result = await authService.login(input.email, input.password)
       response.json(result)
+    })
+  )
+
+  router.post(
+    '/login/mfa',
+    rateLimit({ windowMs: 15 * 60_000, max: 10 }),
+    asyncHandler((request, response) => {
+      const input = parseBody(CompleteMfaLoginRequestSchema, request.body)
+      response.json(
+        authService.completeMfaLogin(input.challengeToken, input.code)
+      )
     })
   )
 

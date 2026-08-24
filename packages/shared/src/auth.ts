@@ -26,9 +26,57 @@ export const LoginRequestSchema = z.object({
   password: z.string().min(1).max(200),
 })
 
-export const LoginResponseSchema = z.object({
+export const SessionGrantSchema = z.object({
   token: z.string(),
   user: UserSchema,
+})
+
+export const MfaChallengeSchema = z.object({
+  mfaRequired: z.literal(true),
+  challengeToken: z.string(),
+})
+
+export const LoginResponseSchema = z.union([
+  SessionGrantSchema,
+  MfaChallengeSchema,
+])
+
+export const CompleteMfaLoginRequestSchema = z.object({
+  challengeToken: z.string().trim().min(1).max(128),
+  code: z.string().trim().min(6).max(32),
+})
+
+export const MfaStatusSchema = z.object({
+  enabled: z.boolean(),
+  recoveryCodesRemaining: z.number().int().nonnegative().nullable(),
+})
+
+export const BeginMfaEnrollmentRequestSchema = z.object({
+  password: z.string().min(1).max(200),
+})
+
+export const MfaEnrollResponseSchema = z.object({
+  secret: z.string(),
+  otpauthUri: z.string(),
+  expiresAt: z.string(),
+})
+
+export const MfaConfirmRequestSchema = z.object({
+  code: z.string().trim().regex(/^\d{6}$/),
+})
+
+export const MfaConfirmResponseSchema = z.object({
+  recoveryCodes: z.array(z.string()),
+  token: z.string(),
+})
+
+export const DisableMfaRequestSchema = z.object({
+  password: z.string().min(1).max(200),
+  code: z.string().trim().min(6).max(32),
+})
+
+export const SessionRefreshResponseSchema = z.object({
+  token: z.string(),
 })
 
 // Self-service signup: creates a new tenant with the caller as its org-admin.
@@ -133,4 +181,17 @@ export type SsoProviderInfo = z.infer<typeof SsoProviderInfoSchema>
 export type AuthProvidersResponse = z.infer<typeof AuthProvidersResponseSchema>
 export type LoginRequest = z.infer<typeof LoginRequestSchema>
 export type LoginResponse = z.infer<typeof LoginResponseSchema>
+export type SessionGrant = z.infer<typeof SessionGrantSchema>
+export type MfaChallenge = z.infer<typeof MfaChallengeSchema>
+export type CompleteMfaLoginRequest = z.infer<
+  typeof CompleteMfaLoginRequestSchema
+>
+export type MfaStatus = z.infer<typeof MfaStatusSchema>
+export type BeginMfaEnrollmentRequest = z.infer<
+  typeof BeginMfaEnrollmentRequestSchema
+>
+export type MfaEnrollResponse = z.infer<typeof MfaEnrollResponseSchema>
+export type MfaConfirmRequest = z.infer<typeof MfaConfirmRequestSchema>
+export type MfaConfirmResponse = z.infer<typeof MfaConfirmResponseSchema>
+export type DisableMfaRequest = z.infer<typeof DisableMfaRequestSchema>
 export type MeResponse = z.infer<typeof MeResponseSchema>

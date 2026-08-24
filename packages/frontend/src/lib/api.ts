@@ -1,6 +1,12 @@
 import {
   AuthProvidersResponseSchema,
+  CompleteMfaLoginRequest,
   CompletePasswordResetResponseSchema,
+  MfaConfirmResponseSchema,
+  MfaEnrollResponseSchema,
+  MfaStatusSchema,
+  SessionGrantSchema,
+  SessionRefreshResponseSchema,
   ApiKeyListResponseSchema,
   ChangePassword,
   CreateApiKeyResponseSchema,
@@ -464,6 +470,45 @@ export function login(payload: LoginRequest) {
     { method: 'POST', body: JSON.stringify(payload) },
     LoginResponseSchema
   )
+}
+
+export function completeMfaLogin(payload: CompleteMfaLoginRequest) {
+  return request(
+    '/api/auth/login/mfa',
+    { method: 'POST', body: JSON.stringify(payload) },
+    SessionGrantSchema
+  )
+}
+
+export function getMfaStatus() {
+  return request('/api/me/mfa', { method: 'GET' }, MfaStatusSchema)
+}
+
+export function beginMfaEnrollment(password: string) {
+  return request(
+    '/api/me/mfa/enroll',
+    { method: 'POST', body: JSON.stringify({ password }) },
+    MfaEnrollResponseSchema
+  )
+}
+
+export async function confirmMfaEnrollment(code: string) {
+  const result = await request(
+    '/api/me/mfa/confirm',
+    { method: 'POST', body: JSON.stringify({ code }) },
+    MfaConfirmResponseSchema
+  )
+  setToken(result.token)
+  return result
+}
+
+export async function disableMfa(password: string, code: string) {
+  const result = await request(
+    '/api/me/mfa',
+    { method: 'DELETE', body: JSON.stringify({ password, code }) },
+    SessionRefreshResponseSchema
+  )
+  setToken(result.token)
 }
 
 export function register(payload: RegisterRequest) {

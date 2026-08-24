@@ -204,6 +204,12 @@ export const config = {
     sessionSecret:
       readEnv('AUTH_SESSION_SECRET', 'COMFLOW_AUTH_SESSION_SECRET') ||
       DEV_SESSION_SECRET,
+    // Used to encrypt TOTP seeds at rest. A separate value eases session-key
+    // rotation; the session secret is the secure compatibility fallback.
+    mfaEncryptionKey:
+      readOptionalEnv('COMFLOW_MFA_ENCRYPTION_KEY') ??
+      (readEnv('AUTH_SESSION_SECRET', 'COMFLOW_AUTH_SESSION_SECRET') ||
+        DEV_SESSION_SECRET),
     // A reset link grants account control, so keep it much shorter-lived than
     // an email-verification link.
     passwordResetTtlHours: Number(

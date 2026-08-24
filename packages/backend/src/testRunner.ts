@@ -59,6 +59,8 @@ async function resetDb() {
     DELETE FROM group_mailboxes;
     DELETE FROM sso_group_mappings;
     DELETE FROM sso_login_states;
+    DELETE FROM mfa_login_challenges;
+    DELETE FROM mfa_recovery_codes;
     DELETE FROM groups;
     DELETE FROM api_keys;
     DELETE FROM did_provisioning_reservations;
@@ -985,6 +987,7 @@ async function main() {
         emailTo: [...config.email.to],
         defaultMaxDids: config.defaultTenantLimits.maxDids,
         sessionSecret: config.auth.sessionSecret,
+        mfaEncryptionKey: config.auth.mfaEncryptionKey,
       }
       config.selfRegistration.enabled = true
       config.auth.required = true
@@ -993,6 +996,7 @@ async function main() {
       config.email.to = ['owner@example.com']
       config.defaultTenantLimits.maxDids = 99
       config.auth.sessionSecret = 'test-session-secret-not-the-public-default'
+      config.auth.mfaEncryptionKey = 'test-mfa-encryption-key-not-the-public-default'
 
       const delivered = {
         verifications: [] as Array<{ email: string; token: string }>,
@@ -1161,6 +1165,7 @@ async function main() {
         config.email.to = previous.emailTo
         config.defaultTenantLimits.maxDids = previous.defaultMaxDids
         config.auth.sessionSecret = previous.sessionSecret
+        config.auth.mfaEncryptionKey = previous.mfaEncryptionKey
       }
     }
   )
@@ -1178,6 +1183,7 @@ async function main() {
         localEnabled: config.auth.localEnabled,
         emailEnabled: config.email.notificationsEnabled,
         sessionSecret: config.auth.sessionSecret,
+        mfaEncryptionKey: config.auth.mfaEncryptionKey,
         sessionTtlHours: config.auth.sessionTtlHours,
         passwordResetTtlHours: config.auth.passwordResetTtlHours,
       }
@@ -1195,6 +1201,10 @@ async function main() {
         assert.throws(() => auth.assertConfiguration(), /32 bytes/)
 
         config.auth.sessionSecret = 'test-session-secret-not-the-public-default'
+        config.auth.mfaEncryptionKey = 'comflow-dev-secret'
+        assert.throws(() => auth.assertConfiguration(), /MFA_ENCRYPTION_KEY/)
+        config.auth.mfaEncryptionKey =
+          'test-mfa-encryption-key-not-the-public-default'
         config.auth.sessionTtlHours = 0
         assert.throws(() => auth.assertConfiguration(), /TTL_HOURS/)
         config.auth.sessionTtlHours = 24
@@ -1215,6 +1225,7 @@ async function main() {
         config.auth.localEnabled = previous.localEnabled
         config.email.notificationsEnabled = previous.emailEnabled
         config.auth.sessionSecret = previous.sessionSecret
+        config.auth.mfaEncryptionKey = previous.mfaEncryptionKey
         config.auth.sessionTtlHours = previous.sessionTtlHours
         config.auth.passwordResetTtlHours = previous.passwordResetTtlHours
       }
@@ -1558,11 +1569,13 @@ async function main() {
         localEnabled: config.auth.localEnabled,
         emailEnabled: config.email.notificationsEnabled,
         sessionSecret: config.auth.sessionSecret,
+        mfaEncryptionKey: config.auth.mfaEncryptionKey,
       }
       config.auth.required = true
       config.auth.localEnabled = true
       config.email.notificationsEnabled = true
       config.auth.sessionSecret = 'password-recovery-integration-secret'
+      config.auth.mfaEncryptionKey = 'password-recovery-mfa-encryption-key'
 
       try {
         const tenantId = ensurePrimaryTenant(config.defaultTenant)
@@ -1644,6 +1657,7 @@ async function main() {
         config.auth.localEnabled = previous.localEnabled
         config.email.notificationsEnabled = previous.emailEnabled
         config.auth.sessionSecret = previous.sessionSecret
+        config.auth.mfaEncryptionKey = previous.mfaEncryptionKey
       }
     }
   )
@@ -1661,9 +1675,11 @@ async function main() {
       const previous = {
         required: config.auth.required,
         sessionSecret: config.auth.sessionSecret,
+        mfaEncryptionKey: config.auth.mfaEncryptionKey,
       }
       config.auth.required = true
       config.auth.sessionSecret = 'password-change-integration-secret'
+      config.auth.mfaEncryptionKey = 'password-change-mfa-encryption-key'
 
       try {
         const tenantId = ensurePrimaryTenant(config.defaultTenant)
@@ -1701,6 +1717,239 @@ async function main() {
       } finally {
         config.auth.required = previous.required
         config.auth.sessionSecret = previous.sessionSecret
+        config.auth.mfaEncryptionKey = previous.mfaEncryptionKey
+      }
+    }
+  )
+
+  await runTest('TOTP generation matches RFC 6238 SHA-1 vectors', async () => {
+    const { totpCodeForCounter } = await import('./lib/totp.js')
+    const secret = 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ'
+    assert.equal(totpCodeForCounter(secret, Math.floor(59 / 30)), '287082')
+    assert.equal(
+      totpCodeForCounter(secret, Math.floor(1111111109 / 30)),
+      '081804'
+    )
+    assert.equal(
+      totpCodeForCounter(secret, Math.floor(20000000000 / 30)),
+      '353130'
+    )
+  })
+
+  await runTest(
+    'MFA challenges and factors are durable, single-use, and replay-safe',
+    async () => {
+      const { db, ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { AuthService } = await import('./services/authService.js')
+      const { MfaService } = await import('./services/mfaService.js')
+      const { userRepository } = await import(
+        './repositories/userRepository.js'
+      )
+      const { auditRepository } = await import(
+        './repositories/auditRepository.js'
+      )
+      const { hashPassword } = await import('./lib/password.js')
+      const { resolveSessionUser } = await import('./services/authService.js')
+      const { totpCodeForCounter } = await import('./lib/totp.js')
+      const previous = {
+        required: config.auth.required,
+        sessionSecret: config.auth.sessionSecret,
+        mfaEncryptionKey: config.auth.mfaEncryptionKey,
+      }
+      config.auth.required = true
+      config.auth.sessionSecret = 'mfa-session-signing-secret-for-tests'
+      config.auth.mfaEncryptionKey = 'mfa-seed-encryption-secret-for-tests'
+
+      try {
+        const tenantId = ensurePrimaryTenant(config.defaultTenant)
+        const user = userRepository.create({
+          email: 'replay-safe@example.com',
+          displayName: 'Replay Safe',
+          passwordHash: hashPassword('correct-horse-battery-staple'),
+          role: 'member',
+          tenantId,
+        })
+        const mfa = new MfaService()
+        const auth = new AuthService(undefined, mfa)
+        auth.assertConfiguration()
+
+        assert.throws(
+          () => mfa.beginEnrollment(user.id, 'wrong-password'),
+          /Current password/
+        )
+        const enrollment = mfa.beginEnrollment(
+          user.id,
+          'correct-horse-battery-staple'
+        )
+        const enrollmentRow = db
+          .prepare(
+            'SELECT totp_secret_encrypted AS secret FROM users WHERE id = ?'
+          )
+          .get(user.id) as { secret: string }
+        assert.notEqual(enrollmentRow.secret, enrollment.secret)
+        assert.equal(enrollmentRow.secret.includes(enrollment.secret), false)
+
+        // Merely displaying a QR code must not make password login require MFA.
+        const beforeConfirm = await auth.login(
+          user.email,
+          'correct-horse-battery-staple'
+        )
+        assert.ok('token' in beforeConfirm)
+        const oldSession = 'token' in beforeConfirm ? beforeConfirm.token : ''
+
+        const counter = Math.floor(Date.now() / 1000 / 30)
+        const confirmed = mfa.confirmEnrollment(
+          user.id,
+          totpCodeForCounter(enrollment.secret, counter - 1)
+        )
+        assert.equal(confirmed.recoveryCodes.length, 10)
+        assert.equal(resolveSessionUser(oldSession), null)
+        assert.equal(mfa.recoveryCodeCount(user.id), 10)
+
+        const challenged = await auth.login(
+          user.email,
+          'correct-horse-battery-staple'
+        )
+        assert.ok('mfaRequired' in challenged)
+        const challengeToken =
+          'mfaRequired' in challenged ? challenged.challengeToken : ''
+        const storedChallenge = db
+          .prepare(
+            'SELECT token_hash AS tokenHash FROM mfa_login_challenges WHERE user_id = ? AND consumed_at IS NULL'
+          )
+          .get(user.id) as { tokenHash: string }
+        assert.notEqual(storedChallenge.tokenHash, challengeToken)
+        assert.equal(storedChallenge.tokenHash.length, 64)
+
+        // Enrollment consumed the prior step, so the current one is the next
+        // admissible counter. Two concurrent exchanges of one challenge yield
+        // exactly one session; the other sees durable consumption.
+        const currentCode = totpCodeForCounter(enrollment.secret, counter)
+        const concurrent = await Promise.allSettled([
+          Promise.resolve().then(() =>
+            auth.completeMfaLogin(challengeToken, currentCode)
+          ),
+          Promise.resolve().then(() =>
+            auth.completeMfaLogin(challengeToken, currentCode)
+          ),
+        ])
+        assert.equal(
+          concurrent.filter(result => result.status === 'fulfilled').length,
+          1
+        )
+        assert.equal(
+          concurrent.filter(result => result.status === 'rejected').length,
+          1
+        )
+
+        // The same TOTP counter cannot be replayed through a fresh challenge.
+        const replayAttempt = await auth.login(
+          user.email,
+          'correct-horse-battery-staple'
+        )
+        const replayToken =
+          'mfaRequired' in replayAttempt ? replayAttempt.challengeToken : ''
+        assert.throws(
+          () => auth.completeMfaLogin(replayToken, currentCode),
+          /Invalid verification code/
+        )
+
+        const expiredAttempt = await auth.login(
+          user.email,
+          'correct-horse-battery-staple'
+        )
+        const expiredToken =
+          'mfaRequired' in expiredAttempt
+            ? expiredAttempt.challengeToken
+            : ''
+        db.prepare(`
+          UPDATE mfa_login_challenges SET expires_at = ?
+          WHERE consumed_at IS NULL AND user_id = ?
+        `).run('2000-01-01T00:00:00.000Z', user.id)
+        assert.throws(
+          () => auth.completeMfaLogin(expiredToken, currentCode),
+          /expired/
+        )
+
+        // A recovery code is deleted atomically. A second challenge cannot use
+        // the same plaintext again, including when the first request won a race.
+        const recoveryAttempt = await auth.login(
+          user.email,
+          'correct-horse-battery-staple'
+        )
+        const recoveryToken =
+          'mfaRequired' in recoveryAttempt
+            ? recoveryAttempt.challengeToken
+            : ''
+        assert.ok(
+          auth.completeMfaLogin(
+            recoveryToken,
+            confirmed.recoveryCodes[0]!
+          ).token
+        )
+        assert.equal(mfa.recoveryCodeCount(user.id), 9)
+        const recoveryReplay = await auth.login(
+          user.email,
+          'correct-horse-battery-staple'
+        )
+        const recoveryReplayToken =
+          'mfaRequired' in recoveryReplay
+            ? recoveryReplay.challengeToken
+            : ''
+        assert.throws(
+          () =>
+            auth.completeMfaLogin(
+              recoveryReplayToken,
+              confirmed.recoveryCodes[0]!
+            ),
+          /Invalid verification code/
+        )
+
+        // Five bad attempts consume the challenge instead of leaving a
+        // six-digit factor online for unlimited guessing.
+        const cappedAttempt = await auth.login(
+          user.email,
+          'correct-horse-battery-staple'
+        )
+        const cappedToken =
+          'mfaRequired' in cappedAttempt ? cappedAttempt.challengeToken : ''
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          assert.throws(
+            () => auth.completeMfaLogin(cappedToken, 'not-a-factor'),
+            /Invalid verification code/
+          )
+        }
+        assert.throws(
+          () => auth.completeMfaLogin(cappedToken, 'not-a-factor'),
+          /expired/
+        )
+
+        const disabled = mfa.disable(
+          user.id,
+          'correct-horse-battery-staple',
+          confirmed.recoveryCodes[1]!
+        )
+        assert.equal(disabled.totpEnabledAt, null)
+        assert.equal(disabled.totpSecretEncrypted, null)
+        assert.equal(mfa.recoveryCodeCount(user.id), 0)
+        const afterDisable = await auth.login(
+          user.email,
+          'correct-horse-battery-staple'
+        )
+        assert.ok('token' in afterDisable)
+
+        const actions = auditRepository
+          .listByTenant(tenantId)
+          .map(entry => entry.action)
+        assert.ok(actions.includes('mfa.enrollment_started'))
+        assert.ok(actions.includes('mfa.enabled'))
+        assert.ok(actions.includes('mfa.login_completed'))
+        assert.ok(actions.includes('mfa.disabled'))
+      } finally {
+        config.auth.required = previous.required
+        config.auth.sessionSecret = previous.sessionSecret
+        config.auth.mfaEncryptionKey = previous.mfaEncryptionKey
       }
     }
   )
