@@ -16,9 +16,11 @@ import { BillingUsagePage } from '../pages/BillingUsagePage'
 import { CallDetailPage } from '../pages/CallDetailPage'
 import { CallInboxPage } from '../pages/CallInboxPage'
 import { LoginPage } from '../pages/LoginPage'
+import { ForgotPasswordPage } from '../pages/ForgotPasswordPage'
 import { OnboardingPage } from '../pages/OnboardingPage'
 import { ProfilePage } from '../pages/ProfilePage'
 import { RegisterPage } from '../pages/RegisterPage'
+import { ResetPasswordPage } from '../pages/ResetPasswordPage'
 import { ScheduledCallsPage } from '../pages/ScheduledCallsPage'
 import { SettingsPage } from '../pages/SettingsPage'
 import { TenantsPage } from '../pages/TenantsPage'
@@ -70,6 +72,8 @@ function AppGate() {
           }
         />
         <Route path="/verify-email" element={<VerifyEmailPage />} />
+        <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
         <Route
           path="*"
           element={
@@ -89,6 +93,11 @@ function AppGate() {
       <Route path="/login" element={<Navigate to="/calls" replace />} />
       <Route path="/register" element={<Navigate to="/onboarding" replace />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route
+        path="/forgot-password"
+        element={<Navigate to="/profile" replace />}
+      />
       <Route element={<ProtectedShell />}>
         <Route path="/" element={<Navigate to="/calls" replace />} />
         <Route path="/calls" element={<CallInboxPage />} />

@@ -1,15 +1,21 @@
 import crypto from 'node:crypto'
 import { config } from '../config.js'
 
-/**
- * Compact HMAC-signed session token (no JWT dependency). Encodes the user id
- * and an expiry; the SSO milestone can replace this behind the AuthProvider.
- */
-export function signSessionToken(userId: string): string {
-  const exp = Date.now() + config.auth.sessionTtlHours * 3_600_000
-  const payload = Buffer.from(JSON.stringify({ sub: userId, exp })).toString(
-    'base64url'
-  )
+export type SessionClaims = {
+  sub: string
+  exp: number
+  /** Snapshot used to revoke all older sessions after credential recovery. */
+  epoch: number
+}
+
+/** Compact HMAC-signed session token with a revocable user epoch. */
+export function signSessionToken(userId: string, epoch: number): string {
+  const claims: SessionClaims = {
+    sub: userId,
+    exp: Date.now() + config.auth.sessionTtlHours * 3_600_000,
+    epoch,
+  }
+  const payload = Buffer.from(JSON.stringify(claims)).toString('base64url')
   const signature = crypto
     .createHmac('sha256', config.auth.sessionSecret)
     .update(payload)
@@ -17,8 +23,8 @@ export function signSessionToken(userId: string): string {
   return `${payload}.${signature}`
 }
 
-/** Returns the user id when the token is valid and unexpired, else null. */
-export function verifySessionToken(token: string): string | null {
+/** Returns validated claims when the token is authentic and current in time. */
+export function verifySessionToken(token: string): SessionClaims | null {
   const [payload, signature] = token.split('.')
   if (!payload || !signature) return null
 
@@ -31,12 +37,22 @@ export function verifySessionToken(token: string): string | null {
   if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null
 
   try {
-    const data = JSON.parse(Buffer.from(payload, 'base64url').toString()) as {
-      sub: string
-      exp: number
+    const data = JSON.parse(
+      Buffer.from(payload, 'base64url').toString()
+    ) as Partial<SessionClaims>
+    if (
+      typeof data.sub !== 'string' ||
+      !data.sub ||
+      typeof data.exp !== 'number' ||
+      !Number.isFinite(data.exp)
+    ) {
+      return null
     }
     if (Date.now() > data.exp) return null
-    return data.sub
+    // Tokens from before the epoch field existed map to the migration default.
+    const epoch = data.epoch ?? 0
+    if (!Number.isInteger(epoch) || epoch < 0) return null
+    return { sub: data.sub, exp: data.exp, epoch }
   } catch {
     return null
   }

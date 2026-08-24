@@ -48,6 +48,19 @@ function readProviderDefault<T extends string>(
   return parsed.success && parsed.data ? parsed.data : 'fake'
 }
 
+/** Public fallback for dev/open mode; hosted signup must never use it. */
+export const DEV_SESSION_SECRET = 'comflow-dev-secret'
+export const EXAMPLE_SESSION_SECRET = 'change-me-in-production'
+
+/** Authentication is not real if anyone can reproduce the signing secret. */
+export function isSecureSessionSecret(secret: string): boolean {
+  return (
+    secret !== DEV_SESSION_SECRET &&
+    secret !== EXAMPLE_SESSION_SECRET &&
+    Buffer.byteLength(secret, 'utf8') >= 32
+  )
+}
+
 export const config = {
   envFilePath,
   port: Number(process.env.PORT ?? 3001),
@@ -190,7 +203,12 @@ export const config = {
     localEnabled: process.env.AUTH_LOCAL_ENABLED !== 'false',
     sessionSecret:
       readEnv('AUTH_SESSION_SECRET', 'COMFLOW_AUTH_SESSION_SECRET') ||
-      'comflow-dev-secret',
+      DEV_SESSION_SECRET,
+    // A reset link grants account control, so keep it much shorter-lived than
+    // an email-verification link.
+    passwordResetTtlHours: Number(
+      process.env.COMFLOW_PASSWORD_RESET_TTL_HOURS ?? 2
+    ),
     bootstrapAdminEmail: readOptionalEnv('COMFLOW_BOOTSTRAP_ADMIN_EMAIL'),
     bootstrapAdminPassword: readOptionalEnv('COMFLOW_BOOTSTRAP_ADMIN_PASSWORD'),
     sessionTtlHours: Number(process.env.COMFLOW_AUTH_SESSION_TTL_HOURS ?? 720),

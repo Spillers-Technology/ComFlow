@@ -1,5 +1,7 @@
 import { Router, urlencoded } from 'express'
 import {
+  CompletePasswordResetRequestSchema,
+  ForgotPasswordRequestSchema,
   LoginRequestSchema,
   RegisterRequestSchema,
   ResendVerificationRequestSchema,
@@ -7,16 +9,21 @@ import {
 } from '../../../shared/src/index.js'
 import { config } from '../config.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
-import { verifySessionToken } from '../lib/token.js'
 import { rateLimit } from '../middleware/rateLimit.js'
-import { AuthService } from '../services/authService.js'
+import {
+  AuthService,
+  resolveSessionUser,
+  toApiUser,
+} from '../services/authService.js'
+import { PasswordResetService } from '../services/passwordResetService.js'
 import { RegistrationService } from '../services/registrationService.js'
 import { SsoService } from '../services/ssoService.js'
 
 export function createAuthRouter(
   authService: AuthService,
   ssoService: SsoService,
-  registrationService: RegistrationService
+  registrationService: RegistrationService,
+  passwordResetService: PasswordResetService
 ) {
   const router = Router()
 
@@ -25,6 +32,7 @@ export function createAuthRouter(
       localEnabled: config.auth.localEnabled,
       providers: ssoService.listProviderInfo(),
       selfRegistrationEnabled: registrationService.enabled,
+      passwordResetEnabled: passwordResetService.enabled,
     }
   }
 
@@ -47,6 +55,7 @@ export function createAuthRouter(
 
   router.post(
     '/login',
+    rateLimit({ windowMs: 15 * 60_000, max: 20 }),
     asyncHandler(async (request, response) => {
       const input = parseBody(LoginRequestSchema, request.body)
       const result = await authService.login(input.email, input.password)
@@ -90,14 +99,34 @@ export function createAuthRouter(
     })
   )
 
+  router.post(
+    '/forgot-password',
+    rateLimit({ windowMs: 15 * 60_000, max: 5 }),
+    asyncHandler(async (request, response) => {
+      const input = parseBody(ForgotPasswordRequestSchema, request.body)
+      await passwordResetService.request(input.email)
+      response.json({ accepted: true })
+    })
+  )
+
+  router.post(
+    '/reset-password',
+    rateLimit({ windowMs: 15 * 60_000, max: 20 }),
+    asyncHandler((request, response) => {
+      const input = parseBody(CompletePasswordResetRequestSchema, request.body)
+      passwordResetService.reset(input.token, input.password)
+      response.json({ ok: true })
+    })
+  )
+
   // Open endpoint so the client can discover auth state and the current user.
   router.get(
     '/me',
     asyncHandler((request, response) => {
       const header = request.headers.authorization
       const token = header?.startsWith('Bearer ') ? header.slice(7) : null
-      const userId = token ? verifySessionToken(token) : null
-      const user = userId ? authService.getUserById(userId) : null
+      const record = token ? resolveSessionUser(token) : null
+      const user = record ? toApiUser(record) : null
       response.json({
         user,
         authRequired: config.auth.required,

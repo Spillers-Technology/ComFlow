@@ -298,6 +298,13 @@ addColumnIfMissing('users', 'email_verified_at', 'TEXT')
 addColumnIfMissing('users', 'email_verification_token', 'TEXT')
 addColumnIfMissing('users', 'email_verification_expires_at', 'TEXT')
 addColumnIfMissing('users', 'self_registered_at', 'TEXT')
+// Password-recovery tokens are random and stored only as SHA-256 hashes.
+addColumnIfMissing('users', 'password_reset_token', 'TEXT')
+addColumnIfMissing('users', 'password_reset_expires_at', 'TEXT')
+addColumnIfMissing('users', 'password_reset_requested_at', 'TEXT')
+// Stateless sessions carry an epoch snapshot. Incrementing this value revokes
+// every previously-issued session without retaining session tokens.
+addColumnIfMissing('users', 'session_epoch', 'INTEGER NOT NULL DEFAULT 0')
 addColumnIfMissing(
   'tenant_billing',
   'pending_topup_cents',

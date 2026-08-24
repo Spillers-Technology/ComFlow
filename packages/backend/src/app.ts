@@ -39,6 +39,7 @@ import { UsageService } from './services/usageService.js'
 import { EmailNotificationService } from './services/emailNotificationService.js'
 import { EngineService } from './services/engineService.js'
 import { MailboxService } from './services/mailboxService.js'
+import { PasswordResetService } from './services/passwordResetService.js'
 import { RegistrationService } from './services/registrationService.js'
 import { ScheduledCallService } from './services/scheduledCallService.js'
 import { SsoService } from './services/ssoService.js'
@@ -71,6 +72,9 @@ export function createApp() {
   const authService = new AuthService()
   const ssoService = new SsoService()
   const registrationService = new RegistrationService(emailNotificationService)
+  const passwordResetService = new PasswordResetService(emailNotificationService)
+  authService.assertConfiguration()
+  passwordResetService.assertConfiguration()
   registrationService.assertConfiguration()
   billingService.assertHostedConfiguration()
   // Ensure the primary tenant exists and back-fill pre-tenancy rows onto it,
@@ -398,7 +402,12 @@ export function createApp() {
   app.use('/api/health', createHealthRouter(engineService))
   app.use(
     '/api/auth',
-    createAuthRouter(authService, ssoService, registrationService)
+    createAuthRouter(
+      authService,
+      ssoService,
+      registrationService,
+      passwordResetService
+    )
   )
   app.use(
     '/api/webhooks',

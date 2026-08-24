@@ -1,5 +1,6 @@
 import {
   AuthProvidersResponseSchema,
+  CompletePasswordResetResponseSchema,
   ApiKeyListResponseSchema,
   ChangePassword,
   CreateApiKeyResponseSchema,
@@ -54,6 +55,7 @@ import {
   ProvisionDidResponseSchema,
   RegisterRequest,
   RegisterResponseSchema,
+  ForgotPasswordResponseSchema,
   ResendVerificationResponseSchema,
   SearchDidsResponseSchema,
   TenantLimitsResponseSchema,
@@ -337,7 +339,7 @@ export async function changePassword(payload: ChangePassword) {
     },
     body: JSON.stringify(payload),
   })
-  if (!response.ok && response.status !== 204) {
+  if (!response.ok) {
     let message = 'Failed to change password.'
     try {
       message = ((await response.json()) as { error?: string }).error ?? message
@@ -346,6 +348,8 @@ export async function changePassword(payload: ChangePassword) {
     }
     throw new Error(message)
   }
+  const body = (await response.json()) as { token?: string }
+  if (body.token) setToken(body.token)
 }
 
 export function getApiKeys() {
@@ -484,6 +488,26 @@ export function resendVerification(email: string) {
     { method: 'POST', body: JSON.stringify({ email }) },
     ResendVerificationResponseSchema
   )
+}
+
+export function forgotPassword(email: string) {
+  return request(
+    '/api/auth/forgot-password',
+    { method: 'POST', body: JSON.stringify({ email }) },
+    ForgotPasswordResponseSchema
+  )
+}
+
+export async function resetPassword(token: string, password: string) {
+  const result = await request(
+    '/api/auth/reset-password',
+    { method: 'POST', body: JSON.stringify({ token, password }) },
+    CompletePasswordResetResponseSchema
+  )
+  // Recovery revokes this browser's old session too. Do not leave a stale
+  // bearer token in storage while telling the user they were signed out.
+  setToken(null)
+  return result
 }
 
 export function getMailboxes() {

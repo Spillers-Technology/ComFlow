@@ -1,9 +1,9 @@
 import { LoginResponse, User } from '../../../shared/src/index.js'
-import { config } from '../config.js'
+import { config, isSecureSessionSecret } from '../config.js'
 import { ensurePrimaryTenant } from '../db/client.js'
 import { HttpError } from '../lib/errors.js'
 import { hashPassword } from '../lib/password.js'
-import { signSessionToken } from '../lib/token.js'
+import { signSessionToken, verifySessionToken } from '../lib/token.js'
 import { LocalAuthProvider } from '../providers/auth/local.js'
 import { AuthProvider } from '../providers/auth/types.js'
 import { UserRecord, userRepository } from '../repositories/userRepository.js'
@@ -20,10 +20,34 @@ export function toApiUser(record: UserRecord): User {
   }
 }
 
+/** Resolve a session and reject it after the user's credential epoch changes. */
+export function resolveSessionUser(token: string): UserRecord | null {
+  const claims = verifySessionToken(token)
+  if (!claims) return null
+  const record = userRepository.getById(claims.sub)
+  return record && record.sessionEpoch === claims.epoch ? record : null
+}
+
 export class AuthService {
   constructor(
     private readonly provider: AuthProvider = new LocalAuthProvider()
   ) {}
+
+  /** Fail closed before accepting traffic with a publicly forgeable session key. */
+  assertConfiguration(): void {
+    if (!config.auth.required) return
+    if (!isSecureSessionSecret(config.auth.sessionSecret)) {
+      throw new Error(
+        'Authentication requires a non-placeholder AUTH_SESSION_SECRET of at least 32 bytes.'
+      )
+    }
+    if (
+      !Number.isFinite(config.auth.sessionTtlHours) ||
+      config.auth.sessionTtlHours <= 0
+    ) {
+      throw new Error('COMFLOW_AUTH_SESSION_TTL_HOURS must be positive.')
+    }
+  }
 
   /**
    * Create the bootstrap platform owner from env on first boot if it doesn't
@@ -50,7 +74,12 @@ export class AuthService {
     if (!user) {
       throw new HttpError(401, 'Invalid email or password.')
     }
-    return { token: signSessionToken(user.id), user }
+    const record = userRepository.getById(user.id)
+    if (!record) throw new HttpError(401, 'Invalid email or password.')
+    return {
+      token: signSessionToken(user.id, record.sessionEpoch),
+      user,
+    }
   }
 
   getUserById(id: string): User | null {

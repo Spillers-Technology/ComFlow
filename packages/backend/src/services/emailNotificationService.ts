@@ -20,6 +20,13 @@ function reviewUrl(call: CallRecord) {
   return `${config.email.publicUrl.replace(/\/$/, '')}/calls/${call.id}`
 }
 
+export function passwordResetUrl(token: string): string {
+  const base = config.email.publicUrl.replace(/\/$/, '')
+  // `#token` belongs to the global SSO callback consumer. Use a distinct key so
+  // password recovery cannot be mistaken for a signed login session.
+  return `${base}/reset-password#reset-token=${encodeURIComponent(token)}`
+}
+
 function recordingAttachment(call: CallRecord) {
   if (!config.email.attachRecording || !call.recordingPath) return []
 
@@ -110,6 +117,35 @@ export class EmailNotificationService {
         link,
         '',
         'If you did not create this account, ignore this message.',
+      ].join('\n'),
+    })
+    return true
+  }
+
+  async sendPasswordReset(
+    email: string,
+    token: string,
+    ttlHours: number
+  ): Promise<boolean> {
+    if (!config.email.notificationsEnabled) return false
+
+    // A fragment is not sent in HTTP requests, keeping this account-takeover
+    // token out of reverse-proxy and ordinary access logs.
+    const link = passwordResetUrl(token)
+    await this.transport.sendMail({
+      from: config.email.from,
+      to: email,
+      subject: '[ComFlow] Reset your password',
+      text: [
+        'Someone asked to reset the ComFlow password for this address.',
+        '',
+        `Set a new password (link expires in ${ttlHours} hour${
+          ttlHours === 1 ? '' : 's'
+        }):`,
+        '',
+        link,
+        '',
+        'If this was not you, ignore this message. Your password is unchanged.',
       ].join('\n'),
     })
     return true

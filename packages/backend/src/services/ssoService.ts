@@ -99,6 +99,9 @@ export class SsoService {
     }
 
     const refreshed = userRepository.getById(user.id)!
-    return { token: signSessionToken(refreshed.id), user: toApiUser(refreshed) }
+    return {
+      token: signSessionToken(refreshed.id, refreshed.sessionEpoch),
+      user: toApiUser(refreshed),
+    }
   }
 }
