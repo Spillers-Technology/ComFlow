@@ -105,9 +105,7 @@ export class PasswordResetService {
       ) {
         throw new HttpError(400, 'Invalid or expired reset link.')
       }
-      userRepository.setPassword(record.id, hashPassword(password))
-      userRepository.clearPasswordReset(record.id)
-      userRepository.bumpSessionEpoch(record.id)
+      userRepository.replacePassword(record.id, hashPassword(password))
       // Recovery is an incident boundary: automation keys minted by a prior
       // session are bearer credentials too and must not survive unnoticed.
       const apiKeysRevoked = apiKeyRepository.removeAllForUser(record.id)

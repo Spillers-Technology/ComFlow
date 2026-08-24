@@ -47,6 +47,8 @@ import { TelephonyGatewayService } from './services/telephonyGatewayService.js'
 import { apiKeyService } from './services/apiKeyService.js'
 import { callRepository } from './repositories/callRepository.js'
 import { groupRepository } from './repositories/groupRepository.js'
+import { apiKeyRepository } from './repositories/apiKeyRepository.js'
+import { auditRepository } from './repositories/auditRepository.js'
 import { userRepository } from './repositories/userRepository.js'
 import { accessService } from './services/accessService.js'
 import { toApiUser } from './services/authService.js'
@@ -249,7 +251,16 @@ export function createApp(): ComFlowApp {
         if (!existing || existing.tenantId !== user.tenantId) {
           throw new HttpError(404, 'User not found.')
         }
-        userRepository.setPassword(id, hashPassword(password))
+        db.transaction(() => {
+          userRepository.replacePassword(id, hashPassword(password))
+          const apiKeysRevoked = apiKeyRepository.removeAllForUser(id)
+          auditRepository.record({
+            actor: user.id,
+            action: 'user.password_reset_by_admin',
+            tenantId: existing.tenantId,
+            detail: { userId: id, apiKeysRevoked, via: 'mcp' },
+          })
+        })()
       },
       delete(id, currentUser) {
         const existing = userRepository.getById(id)

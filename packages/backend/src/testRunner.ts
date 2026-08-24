@@ -1799,6 +1799,96 @@ async function main() {
     }
   )
 
+  await runTest(
+    'admin password reset revokes sessions, reset links, and API keys',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { PasswordResetService } = await import(
+        './services/passwordResetService.js'
+      )
+      const { userRepository } = await import(
+        './repositories/userRepository.js'
+      )
+      const { apiKeyService } = await import('./services/apiKeyService.js')
+      const { hashPassword } = await import('./lib/password.js')
+      const { signSessionToken } = await import('./lib/token.js')
+      const { resolveSessionUser } = await import('./services/authService.js')
+      const previous = {
+        required: config.auth.required,
+        localEnabled: config.auth.localEnabled,
+        emailEnabled: config.email.notificationsEnabled,
+        sessionSecret: config.auth.sessionSecret,
+      }
+      config.auth.required = true
+      config.auth.localEnabled = true
+      config.email.notificationsEnabled = true
+      config.auth.sessionSecret = 'admin-reset-integration-secret-32-bytes'
+
+      try {
+        const tenantId = ensurePrimaryTenant(config.defaultTenant)
+        const admin = userRepository.create({
+          email: 'reset-admin@example.com',
+          displayName: 'Reset Admin',
+          passwordHash: hashPassword('admin-password'),
+          role: 'admin',
+          tenantId,
+        })
+        const target = userRepository.create({
+          email: 'admin-reset-target@example.com',
+          displayName: 'Reset Target',
+          passwordHash: hashPassword('original-password'),
+          role: 'member',
+          tenantId,
+        })
+        const oldSession = signSessionToken(target.id, target.sessionEpoch)
+        const oldApiKey = apiKeyService.create(target.id, 'old key').plaintext
+        const sent: string[] = []
+        const recovery = new PasswordResetService(
+          {
+            async sendPasswordReset(_email: string, token: string) {
+              sent.push(token)
+              return true
+            },
+          },
+          0
+        )
+        await recovery.request(target.email)
+        assert.equal(sent.length, 1)
+
+        await withServer(async baseUrl => {
+          const response = await requestJson(
+            baseUrl,
+            `/api/users/${target.id}/password`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${signSessionToken(
+                  admin.id,
+                  admin.sessionEpoch
+                )}`,
+              },
+              body: JSON.stringify({ password: 'admin-replacement-password' }),
+            }
+          )
+          assert.equal(response.response.status, 204)
+        })
+
+        assert.equal(resolveSessionUser(oldSession), null)
+        assert.equal(apiKeyService.resolve(oldApiKey), null)
+        assert.throws(
+          () => recovery.reset(sent[0]!, 'stale-link-password'),
+          /Invalid or expired/
+        )
+      } finally {
+        config.auth.required = previous.required
+        config.auth.localEnabled = previous.localEnabled
+        config.email.notificationsEnabled = previous.emailEnabled
+        config.auth.sessionSecret = previous.sessionSecret
+      }
+    }
+  )
+
   await runTest('reviewing a call records who reviewed it', async () => {
     await withServer(async baseUrl => {
       await requestJson(baseUrl, '/api/settings/engines', {
