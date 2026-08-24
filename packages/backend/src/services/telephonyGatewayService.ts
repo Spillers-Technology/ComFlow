@@ -51,10 +51,6 @@ function extractNumberFromUri(uri: string | undefined): string {
   return match?.[1] ?? uri
 }
 
-async function delay(ms: number) {
-  return new Promise<void>(resolve => setTimeout(resolve, ms))
-}
-
 function getOutboundDialingDomain(): string | null {
   const settings = sipSettingsRepository.get() ?? config.defaultSipSettings
   if (settings.enabled && settings.outboundDialingDomain) {
@@ -87,6 +83,8 @@ export class TelephonyGatewayService {
       timeout: NodeJS.Timeout | null
     }
   >()
+  private readonly cancelPending = new Set<() => void>()
+  private stopping = false
 
   constructor(
     private readonly callIngestionService: CallIngestionService,
@@ -100,6 +98,7 @@ export class TelephonyGatewayService {
   }
 
   start() {
+    this.stopping = false
     this.client.on('connect', () => {
       console.log(
         `Connected to baresip ctrl at ${config.telephony.baresipCtrlHost}:${config.telephony.baresipCtrlPort}`
@@ -115,6 +114,14 @@ export class TelephonyGatewayService {
   }
 
   stop() {
+    this.stopping = true
+    for (const cancel of [...this.cancelPending]) cancel()
+    this.cancelPending.clear()
+    for (const [callId, tracked] of this.inbound) {
+      if (tracked.timeout) clearTimeout(tracked.timeout)
+      this.concurrencyService.end(callId)
+    }
+    this.inbound.clear()
     this.client.stop()
   }
 
@@ -330,7 +337,7 @@ export class TelephonyGatewayService {
         }
       }
 
-      await delay(request.recordWindowMs)
+      await this.waitUntilStoppedOrTimedOut(request.recordWindowMs)
 
       try {
         await this.client.command(CMD.hangup)
@@ -347,26 +354,57 @@ export class TelephonyGatewayService {
 
   private waitForOutboundEstablished(timeoutMs: number): Promise<boolean> {
     return new Promise(resolve => {
-      const timer = setTimeout(() => {
-        this.client.off('event', onEvent)
+      if (this.stopping) {
         resolve(false)
+        return
+      }
+      let settled = false
+      const finish = (value: boolean) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        this.client.off('event', onEvent)
+        this.cancelPending.delete(cancel)
+        resolve(value)
+      }
+      const timer = setTimeout(() => {
+        finish(false)
       }, timeoutMs)
 
       const onEvent = (event: BaresipEvent) => {
         if (event.class && event.class !== 'call') return
         if (event.direction !== 'outgoing') return
         if (event.type === 'CALL_ESTABLISHED') {
-          clearTimeout(timer)
-          this.client.off('event', onEvent)
-          resolve(true)
+          finish(true)
         } else if (event.type === 'CALL_CLOSED') {
-          clearTimeout(timer)
-          this.client.off('event', onEvent)
-          resolve(false)
+          finish(false)
         }
       }
 
+      const cancel = () => finish(false)
+
       this.client.on('event', onEvent)
+      this.cancelPending.add(cancel)
+    })
+  }
+
+  private waitUntilStoppedOrTimedOut(timeoutMs: number): Promise<void> {
+    return new Promise(resolve => {
+      if (this.stopping) {
+        resolve()
+        return
+      }
+      let settled = false
+      const finish = () => {
+        if (settled) return
+        settled = true
+        clearTimeout(timer)
+        this.cancelPending.delete(cancel)
+        resolve()
+      }
+      const timer = setTimeout(finish, timeoutMs)
+      const cancel = () => finish()
+      this.cancelPending.add(cancel)
     })
   }
 }
