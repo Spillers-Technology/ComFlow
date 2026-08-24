@@ -9,6 +9,8 @@ golden inbox to triage, and pushes the calls worth acting on into
 [![Container image](https://img.shields.io/badge/ghcr.io-spillers--technology%2Fcomflow-blue?logo=docker)](https://github.com/Spillers-Technology/ComFlow/pkgs/container/comflow)
 [![CI](https://github.com/Spillers-Technology/ComFlow/actions/workflows/nodejs-ci.yml/badge.svg)](https://github.com/Spillers-Technology/ComFlow/actions/workflows/nodejs-ci.yml)
 
+**Current release: v4.0.0.**
+
 ![ComFlow inbox — voicemails transcribed, extracted, and triaged](docs/assets/screenshots/comflow-inbox.jpg)
 
 Every voicemail arrives already worked: **who called, from what company, what
