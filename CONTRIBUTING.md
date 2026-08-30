@@ -33,3 +33,8 @@ the pull request without exposing credentials or caller data.
 Explain the operator problem, keep the diff focused, list the checks you ran,
 and include screenshots for UI changes. Update the README or configuration docs
 when behavior or environment variables change.
+
+## License
+
+ComFlow is licensed under the [MIT License](LICENSE). By contributing, you
+agree that your contribution is provided under those same terms.
