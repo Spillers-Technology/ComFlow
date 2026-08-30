@@ -357,7 +357,7 @@ export class StripeBillingProvider implements BillingProvider {
       }
     }
     if (isUsableStatus(subscription.status)) {
-      return { ...base, type: 'subscription_active' }
+      return { ...base, status: subscription.status, type: 'subscription_active' }
     }
     return { ...base, type: 'subscription_updated' }
   }

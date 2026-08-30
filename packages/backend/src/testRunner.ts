@@ -875,6 +875,664 @@ async function main() {
     assert.equal(billing.wallet(tenantId).creditCents, 5000)
   })
 
+  // --- Subscription lifecycle (M1/Unit 2, "one charge to start") -----------
+
+  await runTest(
+    'subscription checkout creates a Stripe customer and returns a checkout URL',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+      const { billingRepository } = await import(
+        './repositories/billingRepository.js'
+      )
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      assert.equal(billingRepository.get(tenantId).stripeCustomerId, null)
+      const checkoutUrl = await billing.subscriptions.startCheckout(tenantId, 'solo')
+      assert.match(checkoutUrl, /^https:\/\/fake\.checkout\/local\?tenant=/)
+      assert.match(checkoutUrl, /mode=subscription/)
+
+      const after = billingRepository.get(tenantId)
+      assert.equal(after.stripeCustomerId, `fake_cus_${tenantId}`)
+      assert.equal(after.subscriptionStatus, null, 'no webhook has landed yet')
+      // The reservation stays held until a webhook resolves it, and is bound
+      // to the provider's real session id (not the internal placeholder) so
+      // a `subscription_checkout_expired` webhook can find and release it.
+      assert.ok(
+        after.pendingCheckoutId?.startsWith('fake_cs_'),
+        'the durable checkout reservation is bound to the provider session id'
+      )
+    }
+  )
+
+  await runTest(
+    'a second concurrent subscription checkout is rejected with 409',
+    async () => {
+      await withServer(async baseUrl => {
+        const first = await requestJson(
+          baseUrl,
+          '/api/billing/subscription/checkout',
+          { method: 'POST', body: JSON.stringify({ planId: 'solo' }) }
+        )
+        assert.equal(first.response.status, 201)
+        assert.equal(typeof first.body?.checkoutUrl, 'string')
+
+        // Fired before the first checkout resolves via webhook — the durable
+        // reservation, not merely an in-memory lock, must reject this.
+        const second = await requestJson(
+          baseUrl,
+          '/api/billing/subscription/checkout',
+          { method: 'POST', body: JSON.stringify({ planId: 'solo' }) }
+        )
+        assert.equal(second.response.status, 409)
+        assert.match(String(second.body?.error), /already in progress/i)
+      })
+    }
+  )
+
+  await runTest(
+    'starting checkout when already subscribed returns 409',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-already-1',
+          type: 'subscription_active',
+          tenantId,
+          subscriptionId: 'sub_already_1',
+          status: 'active',
+        }),
+        undefined
+      )
+      assert.equal(billing.subscriptions.isUsable(tenantId), true)
+
+      await assert.rejects(
+        () => billing.subscriptions.startCheckout(tenantId, 'solo'),
+        (error: unknown) => {
+          assert.equal((error as { statusCode?: number }).statusCode, 409)
+          return true
+        }
+      )
+    }
+  )
+
+  await runTest(
+    'a subscription_active webhook unlocks DID provisioning with zero wallet balance',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      // Force wallet enforcement on so the test isn't vacuous — dev mode's
+      // free-plan bypass would let an unfunded wallet through regardless.
+      const previousEnforced = config.billing.enforced
+      config.billing.enforced = true
+      try {
+        assert.equal(billing.balanceCents(tenantId), 0)
+        assert.throws(
+          () => billing.assertCanProvisionDid(tenantId),
+          /balance exhausted/i
+        )
+
+        await billing.handleWebhook(
+          JSON.stringify({
+            id: 'evt-unlock-1',
+            type: 'subscription_active',
+            tenantId,
+            subscriptionId: 'sub_unlock_1',
+            status: 'active',
+          }),
+          undefined
+        )
+
+        assert.equal(billing.balanceCents(tenantId), 0, 'wallet stays untouched')
+        billing.assertCanProvisionDid(tenantId) // must not throw
+      } finally {
+        config.billing.enforced = previousEnforced
+      }
+    }
+  )
+
+  await runTest(
+    'replaying a subscription_active webhook event id does not double-apply or double-audit',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+      const { auditRepository } = await import(
+        './repositories/auditRepository.js'
+      )
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      const event = JSON.stringify({
+        id: 'evt-replay-1',
+        type: 'subscription_active',
+        tenantId,
+        subscriptionId: 'sub_replay_1',
+        status: 'active',
+      })
+
+      await billing.handleWebhook(event, undefined)
+      const first = billing.subscriptions.status(tenantId)
+      await billing.handleWebhook(event, undefined) // exact replay
+      const second = billing.subscriptions.status(tenantId)
+
+      assert.deepEqual(second, first)
+      const activations = auditRepository
+        .listByTenant(tenantId)
+        .filter(entry => entry.action === 'subscription.activated')
+      assert.equal(activations.length, 1)
+    }
+  )
+
+  await runTest(
+    'cancelAtPeriodEnd then reactivate updates subscription state without losing usability',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-cancel-1',
+          type: 'subscription_active',
+          tenantId,
+          subscriptionId: 'sub_cancel_1',
+          status: 'active',
+        }),
+        undefined
+      )
+      assert.equal(billing.subscriptions.status(tenantId).cancelAtPeriodEnd, false)
+
+      await billing.subscriptions.cancelAtPeriodEnd(tenantId, 'test-admin')
+      const canceling = billing.subscriptions.status(tenantId)
+      assert.equal(canceling.cancelAtPeriodEnd, true)
+      assert.equal(canceling.status, 'active')
+      assert.equal(
+        canceling.usable,
+        true,
+        'service keeps running until the period ends'
+      )
+      assert.equal(billing.subscriptions.isUsable(tenantId), true)
+
+      await billing.subscriptions.reactivate(tenantId, 'test-admin')
+      const reactivated = billing.subscriptions.status(tenantId)
+      assert.equal(reactivated.cancelAtPeriodEnd, false)
+      assert.equal(reactivated.usable, true)
+    }
+  )
+
+  await runTest(
+    'changePlan succeeds against the single-plan catalog',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-plan-1',
+          type: 'subscription_active',
+          tenantId,
+          subscriptionId: 'sub_plan_1',
+          status: 'active',
+        }),
+        undefined
+      )
+
+      await billing.subscriptions.changePlan(tenantId, 'solo', 'test-admin')
+      const status = billing.subscriptions.status(tenantId)
+      assert.equal(status.planId, 'solo')
+      assert.equal(status.usable, true)
+
+      // The catalog has exactly one entry today — an unrecognized plan id
+      // must still be rejected, not silently accepted as a no-op.
+      await assert.rejects(
+        () => billing.subscriptions.changePlan(tenantId, 'enterprise', 'test-admin'),
+        /Unknown plan/
+      )
+    }
+  )
+
+  await runTest(
+    'reconcile re-syncs local subscription state after a provider-side drift',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-reconcile-1',
+          type: 'subscription_active',
+          tenantId,
+          subscriptionId: 'sub_reconcile_1',
+          status: 'active',
+        }),
+        undefined
+      )
+      assert.equal(billing.subscriptions.status(tenantId).status, 'active')
+
+      // Simulate a missed webhook: the provider moved to past_due but ComFlow
+      // never heard about it.
+      provider.setSubscriptionStateForTesting('sub_reconcile_1', {
+        tenantId,
+        customerId: `fake_cus_${tenantId}`,
+        status: 'past_due',
+      })
+
+      const result = await billing.subscriptions.reconcile(tenantId)
+      assert.equal(result.changed, true)
+      assert.equal(result.status, 'past_due')
+      assert.equal(billing.subscriptions.status(tenantId).status, 'past_due')
+
+      const again = await billing.subscriptions.reconcile(tenantId)
+      assert.equal(
+        again.changed,
+        false,
+        'reconciling already-consistent state reports no change'
+      )
+    }
+  )
+
+  await runTest(
+    'a failed renewal stays usable within the grace window and loses usability after it elapses',
+    async () => {
+      const { db, ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      const previousEnforced = config.billing.enforced
+      config.billing.enforced = true
+      try {
+        // Anchor everything to an explicit period rather than the fake
+        // provider's own now+30d default, so the assertions below are exact
+        // rather than approximate.
+        const currentPeriodStart = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString()
+        const currentPeriodEnd = new Date(Date.now() + 10 * 24 * 60 * 60 * 1000).toISOString()
+        const expectedGraceEnd = new Date(
+          Date.parse(currentPeriodEnd) + config.billing.subscriptionGraceDays * 24 * 60 * 60 * 1000
+        ).toISOString()
+
+        await billing.handleWebhook(
+          JSON.stringify({
+            id: 'evt-grace-1',
+            type: 'subscription_active',
+            tenantId,
+            subscriptionId: 'sub_grace_1',
+            status: 'active',
+            currentPeriodStart,
+            currentPeriodEnd,
+          }),
+          undefined
+        )
+
+        await billing.handleWebhook(
+          JSON.stringify({
+            id: 'evt-grace-2',
+            type: 'subscription_payment_failed',
+            tenantId,
+            subscriptionId: 'sub_grace_1',
+            status: 'past_due',
+            currentPeriodStart,
+            currentPeriodEnd,
+          }),
+          undefined
+        )
+
+        const inGrace = billing.subscriptions.status(tenantId)
+        assert.equal(inGrace.status, 'past_due')
+        assert.equal(inGrace.usable, true, 'stays usable inside the grace window')
+        assert.equal(
+          inGrace.gracePeriodEnd,
+          expectedGraceEnd,
+          'grace end is anchored to the failed period end, not to processing time'
+        )
+        billing.assertCanProvisionDid(tenantId) // must not throw while in grace
+
+        // A second, distinct dunning-retry event (its own event id, same
+        // subscription and same failed period) must not push the grace
+        // window further out — this is the exact indefinite-extension bug
+        // the period-anchored design fixes.
+        await billing.handleWebhook(
+          JSON.stringify({
+            id: 'evt-grace-3',
+            type: 'subscription_payment_failed',
+            tenantId,
+            subscriptionId: 'sub_grace_1',
+            status: 'past_due',
+            currentPeriodStart,
+            currentPeriodEnd,
+          }),
+          undefined
+        )
+        assert.equal(
+          billing.subscriptions.status(tenantId).gracePeriodEnd,
+          expectedGraceEnd,
+          'a repeat dunning retry for the same period does not extend grace'
+        )
+
+        // Force the grace window into the past to simulate it elapsing —
+        // deterministic instead of waiting real time.
+        db.prepare(
+          'UPDATE tenant_billing SET subscription_grace_period_end = ? WHERE tenant_id = ?'
+        ).run(new Date(Date.now() - 1000).toISOString(), tenantId)
+
+        assert.equal(billing.subscriptions.isUsable(tenantId), false)
+        assert.throws(
+          () => billing.assertCanProvisionDid(tenantId),
+          /balance exhausted/i
+        )
+      } finally {
+        config.billing.enforced = previousEnforced
+      }
+    }
+  )
+
+  await runTest(
+    "subscription actions for one tenant never affect another tenant's billing row",
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { tenantRepository } = await import(
+        './repositories/tenantRepository.js'
+      )
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+
+      const tenantA = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const tenantB = tenantRepository.create({ name: 'Acme', slug: 'acme' }).id
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-iso-1',
+          type: 'subscription_active',
+          tenantId: tenantA,
+          subscriptionId: 'sub_iso_a',
+          status: 'active',
+        }),
+        undefined
+      )
+
+      assert.equal(billing.subscriptions.isUsable(tenantA), true)
+      assert.equal(billing.subscriptions.isUsable(tenantB), false)
+      assert.equal(billing.subscriptions.status(tenantB).status, 'none')
+      assert.equal(billing.subscriptions.status(tenantB).planId, null)
+
+      await billing.subscriptions.cancelAtPeriodEnd(tenantA, 'test-admin')
+      assert.equal(billing.subscriptions.status(tenantB).cancelAtPeriodEnd, false)
+
+      // Tenant B can start its own checkout without interference from A's state.
+      const checkoutUrlB = await billing.subscriptions.startCheckout(tenantB, 'solo')
+      assert.match(checkoutUrlB, new RegExp(`tenant=${tenantB}`))
+      assert.equal(billing.subscriptions.status(tenantA).cancelAtPeriodEnd, true)
+    }
+  )
+
+  await runTest(
+    'a delayed cancellation for a superseded subscription id does not cancel the current one',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      // The tenant's original subscription goes active...
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-stale-1',
+          type: 'subscription_active',
+          tenantId,
+          subscriptionId: 'sub_old',
+          status: 'active',
+        }),
+        undefined
+      )
+
+      // ...then a replacement subscription (e.g. reissued directly in Stripe)
+      // goes active, which is always trusted and overwrites local state.
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-stale-2',
+          type: 'subscription_active',
+          tenantId,
+          subscriptionId: 'sub_new',
+          status: 'active',
+        }),
+        undefined
+      )
+      assert.equal(billing.subscriptions.status(tenantId).status, 'active')
+
+      // A delayed `customer.subscription.deleted` for the OLD subscription
+      // arrives after the replacement is already current — must be ignored,
+      // not applied on top of the tenant's current (different) subscription.
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-stale-3',
+          type: 'subscription_canceled',
+          tenantId,
+          subscriptionId: 'sub_old',
+          canceledAt: new Date().toISOString(),
+        }),
+        undefined
+      )
+
+      const status = billing.subscriptions.status(tenantId)
+      assert.equal(
+        status.status,
+        'active',
+        'a stale event for a superseded subscription id must not cancel the current subscription'
+      )
+      assert.equal(billing.subscriptions.isUsable(tenantId), true)
+
+      // A stale `subscription_payment_failed` for the old id must likewise
+      // not open a grace window against the current (still-active) state.
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-stale-4',
+          type: 'subscription_payment_failed',
+          tenantId,
+          subscriptionId: 'sub_old',
+          status: 'past_due',
+        }),
+        undefined
+      )
+      assert.equal(billing.subscriptions.status(tenantId).status, 'active')
+      assert.equal(billing.subscriptions.status(tenantId).gracePeriodEnd, null)
+    }
+  )
+
+  await runTest(
+    'an out-of-order replay of an old subscription_active event cannot roll back the current subscription',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      const oldPeriodStart = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString()
+      const oldPeriodEnd = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+      const newPeriodStart = new Date().toISOString()
+      const newPeriodEnd = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-reorder-1',
+          type: 'subscription_active',
+          tenantId,
+          subscriptionId: 'sub_old',
+          status: 'active',
+          currentPeriodStart: oldPeriodStart,
+          currentPeriodEnd: oldPeriodEnd,
+        }),
+        undefined
+      )
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-reorder-2',
+          type: 'subscription_active',
+          tenantId,
+          subscriptionId: 'sub_new',
+          status: 'active',
+          currentPeriodStart: newPeriodStart,
+          currentPeriodEnd: newPeriodEnd,
+        }),
+        undefined
+      )
+      assert.equal(billing.subscriptions.status(tenantId).planId, 'solo')
+
+      // A late-arriving redelivery of the FIRST (now-superseded) active event
+      // — its period necessarily started before the current one's — must not
+      // roll the tenant's current subscription back to the old id.
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-reorder-3',
+          type: 'subscription_active',
+          tenantId,
+          subscriptionId: 'sub_old',
+          status: 'active',
+          currentPeriodStart: oldPeriodStart,
+          currentPeriodEnd: oldPeriodEnd,
+        }),
+        undefined
+      )
+
+      const status = billing.subscriptions.status(tenantId)
+      assert.equal(
+        status.currentPeriodEnd,
+        newPeriodEnd,
+        'an out-of-order replay for an older period must not overwrite the current subscription'
+      )
+    }
+  )
+
+  await runTest(
+    'reconcile fails closed when the live Stripe price is unrecognized',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      await billing.handleWebhook(
+        JSON.stringify({
+          id: 'evt-reconcile-unknown-1',
+          type: 'subscription_active',
+          tenantId,
+          subscriptionId: 'sub_reconcile_unknown',
+          status: 'active',
+        }),
+        undefined
+      )
+      assert.equal(billing.subscriptions.status(tenantId).planId, 'solo')
+
+      // The live subscription now bills a price this deployment doesn't
+      // recognize (e.g. retired/misconfigured).
+      provider.setSubscriptionStateForTesting('sub_reconcile_unknown', {
+        tenantId,
+        customerId: `fake_cus_${tenantId}`,
+        priceId: 'price_retired',
+      })
+
+      const result = await billing.subscriptions.reconcile(tenantId)
+      assert.equal(result.changed, true)
+      const status = billing.subscriptions.status(tenantId)
+      assert.equal(status.planId, null, 'reconcile must not keep the stale plan for an unrecognized live price')
+      assert.equal(status.usable, false)
+    }
+  )
+
+  await runTest(
+    'an active subscription for an unrecognized price never grants service',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { BillingService } = await import('./services/billingService.js')
+      const { FakeBillingProvider } = await import('./providers/billing/fake.js')
+
+      const tenantId = ensurePrimaryTenant({ name: 'Primary', slug: 'primary' })
+      const provider = new FakeBillingProvider()
+      const billing = new BillingService(provider)
+
+      const previousEnforced = config.billing.enforced
+      config.billing.enforced = true
+      try {
+        await billing.handleWebhook(
+          JSON.stringify({
+            id: 'evt-unknown-price',
+            type: 'subscription_active',
+            tenantId,
+            subscriptionId: 'sub_unknown',
+            status: 'active',
+            priceId: 'price_not_in_catalog',
+          }),
+          undefined
+        )
+
+        const status = billing.subscriptions.status(tenantId)
+        assert.equal(status.status, 'active')
+        assert.equal(status.planId, null, 'an unrecognized price never maps to a plan')
+        assert.equal(
+          status.usable,
+          false,
+          'active status alone must not grant service without a recognized plan'
+        )
+        assert.throws(
+          () => billing.assertCanProvisionDid(tenantId),
+          /balance exhausted/i
+        )
+      } finally {
+        config.billing.enforced = previousEnforced
+      }
+    }
+  )
+
   await runTest(
     'self-registration is atomic and leaves no tenant when an audit write fails',
     async () => {

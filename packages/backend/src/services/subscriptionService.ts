@@ -24,11 +24,18 @@ export function getPlanCatalog(): Plan[] {
     {
       id: subscriptionPlan.id,
       name: subscriptionPlan.name,
+      description: subscriptionPlan.description,
       priceCents: subscriptionPlan.priceCents,
+      currency: subscriptionPlan.currency,
       interval: subscriptionPlan.interval,
       maxDids: limits.maxDids,
       includedMinutes: limits.includedMinutes,
       maxConcurrentCalls: limits.maxConcurrentCalls,
+      // Usage beyond the included allowance draws the wallet at the same
+      // markup self-registration already applies to metered usage — one
+      // markup number instead of a second copy living in billing config.
+      overageMarkupBps: limits.markupBps,
+      taxBehavior: 'exclusive',
     },
   ]
 }
@@ -54,17 +61,63 @@ function planIdForPrice(priceId: string): string | null {
   return getPlanCatalog().find(plan => priceIdForPlan(plan.id) === priceId)?.id ?? null
 }
 
-function isUsable(status: TenantBilling['subscriptionStatus']): boolean {
-  return status === 'active' || status === 'trialing'
+/**
+ * Usable also covers the bounded past-due grace window (see
+ * `config.billing.subscriptionGraceDays`): a failed renewal keeps granting
+ * service until `subscriptionGracePeriodEnd` so a customer has time to fix
+ * their payment method before losing the DID. Requires a recognized `plan`
+ * (an active/trialing row for a Stripe price we don't map to a plan must
+ * never grant service — see `applyEvent`, which now refuses to store one)
+ * and a `currentPeriodEnd` that hasn't clearly lapsed, so a stale local
+ * "active" row left behind by a missed terminal webhook fails closed instead
+ * of granting service indefinitely until someone happens to call reconcile.
+ */
+function isUsable(
+  billing: Pick<
+    TenantBilling,
+    'subscriptionStatus' | 'subscriptionGracePeriodEnd' | 'plan' | 'currentPeriodEnd'
+  >
+): boolean {
+  if (!billing.plan) return false
+  if (billing.subscriptionStatus === 'active' || billing.subscriptionStatus === 'trialing') {
+    return Boolean(billing.currentPeriodEnd) && Date.parse(billing.currentPeriodEnd!) > Date.now()
+  }
+  if (billing.subscriptionStatus === 'past_due' && billing.subscriptionGracePeriodEnd) {
+    return Date.parse(billing.subscriptionGracePeriodEnd) > Date.now()
+  }
+  return false
+}
+
+/**
+ * The grace-period end to persist alongside a status transition. Anchored to
+ * the billing period that failed to renew (`currentPeriodEnd`), not to when
+ * we happened to process a given webhook — Stripe's dunning retries fire a
+ * fresh `invoice.payment_failed` (a new event id) every few days for the
+ * *same* failed period, and event-id idempotency does not deduplicate across
+ * those. Anchoring to processing time let repeated retries push the grace
+ * window out indefinitely; anchoring to `currentPeriodEnd` instead means
+ * every event about the same unpaid period computes the same grace end, and
+ * the window only genuinely moves once Stripe reports a new period.
+ */
+function graceUntil(
+  status: TenantBilling['subscriptionStatus'],
+  currentPeriodEnd: string
+): string | null {
+  if (status !== 'past_due') return null
+  const days = config.billing.subscriptionGraceDays
+  if (!Number.isFinite(days) || days <= 0) return null
+  return new Date(Date.parse(currentPeriodEnd) + days * 24 * 60 * 60 * 1000).toISOString()
 }
 
 function toSubscription(billing: TenantBilling): Subscription {
   return {
     status: billing.subscriptionStatus ?? 'none',
     planId: billing.plan,
+    currentPeriodStart: billing.currentPeriodStart,
     currentPeriodEnd: billing.currentPeriodEnd,
+    gracePeriodEnd: billing.subscriptionGracePeriodEnd,
     cancelAtPeriodEnd: billing.cancelAtPeriodEnd,
-    usable: isUsable(billing.subscriptionStatus),
+    usable: isUsable(billing),
   }
 }
 
@@ -91,7 +144,7 @@ export class SubscriptionService {
 
   /** Whether a tenant's subscription alone should unlock plan-included service. */
   isUsable(tenantId: string): boolean {
-    return isUsable(billingRepository.get(tenantId).subscriptionStatus)
+    return isUsable(billingRepository.get(tenantId))
   }
 
   private tenantBillingEmail(tenantId: string): string | null {
@@ -112,16 +165,24 @@ export class SubscriptionService {
     if (!plan) throw new HttpError(400, `Unknown plan: ${planId}`)
 
     const billing = billingRepository.get(tenantId)
-    if (isUsable(billing.subscriptionStatus)) {
+    if (isUsable(billing)) {
       throw new HttpError(409, 'This tenant already has an active subscription.')
     }
 
     const checkoutId = `pending_${tenantId}_${Date.now()}`
-    const reserved = billingRepository.reserveSubscriptionCheckout(
+    // Returns a 3-way outcome, not a boolean: 'reserved' is the only success
+    // case, and both failure cases (already subscribed since we last read
+    // `billing`, or a concurrent checkout still pending) must 409 — this is
+    // the atomic guard against opening two concurrent subscription Checkout
+    // sessions for one tenant, so every non-'reserved' outcome has to reject.
+    const reservation = billingRepository.reserveSubscriptionCheckout(
       tenantId,
       checkoutId
     )
-    if (!reserved) {
+    if (reservation === 'already_subscribed') {
+      throw new HttpError(409, 'This tenant already has an active subscription.')
+    }
+    if (reservation === 'checkout_pending') {
       throw new HttpError(
         409,
         'A subscription checkout is already in progress for this tenant. Complete or wait for it to expire before starting another.'
@@ -141,10 +202,21 @@ export class SubscriptionService {
         tenantId,
         customerId,
         priceId: priceIdForPlan(planId),
+        // Stable per reservation, not per attempt: if this call is retried
+        // (e.g. after a network error) before the reservation is released, it
+        // must reuse the same Stripe Checkout session rather than create a
+        // second one under the same reservation.
+        idempotencyKey: checkoutId,
       })
-      // The reservation is keyed on our own placeholder id, not the
-      // provider's session id — its only job is to durably hold "a checkout
-      // is in flight" until a webhook resolves it or the reservation expires.
+      // Replace our placeholder reservation key with the real provider
+      // session id once one exists, so a later `subscription_checkout_expired`
+      // webhook (which carries Stripe's own session id, not our placeholder)
+      // can find and release this exact reservation. Best-effort: if the
+      // provider didn't return one, the reservation still expires on its own
+      // after 24h.
+      if (session.sessionId) {
+        billingRepository.bindSubscriptionCheckout(tenantId, checkoutId, session.sessionId)
+      }
       return session.url
     } catch (error) {
       billingRepository.releaseSubscriptionCheckoutReservation(tenantId, checkoutId)
@@ -167,15 +239,84 @@ export class SubscriptionService {
 
   /** Apply one verified, deduplicated subscription webhook event. Called by BillingService.handleWebhook. */
   applyEvent(tenantId: string, event: PaymentEvent): void {
+    const billing = billingRepository.get(tenantId)
+
+    // Events about a subscription id other than the tenant's current one are
+    // stale/superseded (e.g. a delayed `customer.subscription.deleted` for an
+    // old subscription arriving after a replacement already went active) and
+    // must never mutate the tenant's *current* subscription state.
+    // `subscription_active` is deliberately exempt: it is the signal that a
+    // (possibly new, replacement) subscription is now the truth, and Stripe
+    // is authoritative for that — gating it on the previously-stored id would
+    // block a legitimate reactivation under a fresh subscription id.
+    function rejectIfStale(eventSubscriptionId: string): boolean {
+      if (billing.subscriptionId === null || billing.subscriptionId === eventSubscriptionId) {
+        return false
+      }
+      auditRepository.record({
+        actor: 'system:billing-webhook',
+        action: 'subscription.stale_event_ignored',
+        tenantId,
+        detail: {
+          eventType: event.type,
+          eventSubscriptionId,
+          currentSubscriptionId: billing.subscriptionId,
+          eventId: event.id,
+        },
+      })
+      return true
+    }
+
     switch (event.type) {
       case 'subscription_active':
       case 'subscription_updated': {
+        if (event.type === 'subscription_updated' && rejectIfStale(event.subscriptionId)) return
+        // 'subscription_active' for a *different* subscription id is normally
+        // trusted outright (see the comment on `rejectIfStale` above — a
+        // legitimate replacement subscription must be able to win). But an
+        // out-of-order redelivery of an *older* active event for a
+        // subscription that has since been superseded looks the same on the
+        // wire; the one thing that distinguishes it is that its own period
+        // necessarily started before the currently-stored subscription's
+        // period did. Reject only that case, so replays can't roll a tenant
+        // back to a subscription it has already moved on from.
+        if (
+          event.type === 'subscription_active' &&
+          billing.subscriptionId &&
+          billing.subscriptionId !== event.subscriptionId &&
+          billing.subscriptionStatus !== 'canceled' &&
+          billing.currentPeriodStart &&
+          Date.parse(event.currentPeriodStart) < Date.parse(billing.currentPeriodStart)
+        ) {
+          auditRepository.record({
+            actor: 'system:billing-webhook',
+            action: 'subscription.stale_event_ignored',
+            tenantId,
+            detail: {
+              eventType: event.type,
+              eventSubscriptionId: event.subscriptionId,
+              currentSubscriptionId: billing.subscriptionId,
+              eventId: event.id,
+            },
+          })
+          return
+        }
         billingRepository.setSubscriptionState(tenantId, {
           subscriptionId: event.subscriptionId,
+          // An active/trialing row for a Stripe price this deployment
+          // doesn't recognize must never grant service — leaving the
+          // previous plan in place here (like `reconcile` already does)
+          // would let an unrecognized/misconfigured price ride on the last
+          // known-good plan's entitlement.
           plan: planIdForPrice(event.priceId),
           status: event.status,
           priceId: event.priceId,
+          currentPeriodStart: event.currentPeriodStart,
           currentPeriodEnd: event.currentPeriodEnd,
+          // 'subscription_updated' can carry a non-active status (e.g.
+          // past_due mid-dunning) as much as 'subscription_active' carries
+          // active/trialing, so both go through the same grace computation.
+          gracePeriodEnd: graceUntil(event.status, event.currentPeriodEnd),
           cancelAtPeriodEnd: event.cancelAtPeriodEnd,
         })
         // A subscription reactivating out of a wallet-funded dry run doesn't
@@ -199,22 +340,57 @@ export class SubscriptionService {
         return
       }
       case 'subscription_payment_failed': {
-        billingRepository.markSubscriptionPaymentFailed(tenantId)
+        if (rejectIfStale(event.subscriptionId)) return
+        const gracePeriodEnd = graceUntil(event.status, event.currentPeriodEnd)
+        billingRepository.markSubscriptionPaymentFailed(tenantId, {
+          subscriptionId: event.subscriptionId,
+          plan: planIdForPrice(event.priceId) ?? billing.plan,
+          status: event.status,
+          priceId: event.priceId,
+          currentPeriodStart: event.currentPeriodStart,
+          currentPeriodEnd: event.currentPeriodEnd,
+          gracePeriodEnd,
+          cancelAtPeriodEnd: event.cancelAtPeriodEnd,
+        })
         auditRepository.record({
           actor: 'system:billing-webhook',
           action: 'subscription.payment_failed',
           tenantId,
-          detail: { subscriptionId: event.subscriptionId, eventId: event.id },
+          detail: {
+            subscriptionId: event.subscriptionId,
+            eventId: event.id,
+            status: event.status,
+            gracePeriodEnd,
+          },
         })
         return
       }
       case 'subscription_canceled': {
+        if (rejectIfStale(event.subscriptionId)) return
         billingRepository.markSubscriptionCanceled(tenantId)
         auditRepository.record({
           actor: 'system:billing-webhook',
           action: 'subscription.canceled',
           tenantId,
           detail: { subscriptionId: event.subscriptionId, eventId: event.id },
+        })
+        return
+      }
+      case 'subscription_checkout_expired': {
+        // Stripe's own signal that an abandoned Checkout session is
+        // definitively gone — the authoritative way to release the pending
+        // reservation, rather than guessing at release time based on our own
+        // request errors (see `startCheckout`'s catch block, which does not
+        // release on ambiguous provider-call failures).
+        billingRepository.releaseSubscriptionCheckoutReservation(
+          tenantId,
+          event.checkoutId
+        )
+        auditRepository.record({
+          actor: 'system:billing-webhook',
+          action: 'subscription.checkout_expired',
+          tenantId,
+          detail: { checkoutId: event.checkoutId, eventId: event.id },
         })
         return
       }
@@ -226,7 +402,7 @@ export class SubscriptionService {
   /** Schedule cancellation for the end of the current billing period; service keeps running until then. */
   async cancelAtPeriodEnd(tenantId: string, actor: string): Promise<void> {
     const billing = billingRepository.get(tenantId)
-    if (!billing.subscriptionId || !isUsable(billing.subscriptionStatus)) {
+    if (!billing.subscriptionId || !isUsable(billing)) {
       throw new HttpError(404, 'No active subscription to cancel.')
     }
     await this.provider.cancelSubscription({
@@ -266,7 +442,7 @@ export class SubscriptionService {
   /** Change which plan (price) an active subscription bills. Scaffolding for when a second plan exists. */
   async changePlan(tenantId: string, planId: string, actor: string): Promise<void> {
     const billing = billingRepository.get(tenantId)
-    if (!billing.subscriptionId || !isUsable(billing.subscriptionStatus)) {
+    if (!billing.subscriptionId || !isUsable(billing)) {
       throw new HttpError(404, 'No active subscription to change.')
     }
     const priceId = priceIdForPlan(planId)
@@ -279,7 +455,9 @@ export class SubscriptionService {
       plan: planId,
       status: billing.subscriptionStatus ?? 'active',
       priceId,
+      currentPeriodStart: billing.currentPeriodStart ?? new Date().toISOString(),
       currentPeriodEnd: billing.currentPeriodEnd ?? new Date().toISOString(),
+      gracePeriodEnd: billing.subscriptionGracePeriodEnd,
       cancelAtPeriodEnd: billing.cancelAtPeriodEnd,
     })
     auditRepository.record({
@@ -354,16 +532,23 @@ export class SubscriptionService {
       billing.subscriptionId !== remote.id ||
       billing.subscriptionStatus !== remote.status ||
       billing.subscriptionPriceId !== remote.priceId ||
+      billing.currentPeriodStart !== remote.currentPeriodStart ||
       billing.currentPeriodEnd !== remote.currentPeriodEnd ||
       billing.cancelAtPeriodEnd !== remote.cancelAtPeriodEnd
 
     if (changed) {
       billingRepository.setSubscriptionState(tenantId, {
         subscriptionId: remote.id,
-        plan: planIdForPrice(remote.priceId) ?? billing.plan,
+        // Fail closed like `applyEvent` does: a live Stripe price this
+        // deployment doesn't recognize must not keep riding on whatever plan
+        // was last known-good — that would let a misconfigured/retired price
+        // stay "usable" indefinitely via the repair path.
+        plan: planIdForPrice(remote.priceId),
         status: remote.status,
         priceId: remote.priceId,
+        currentPeriodStart: remote.currentPeriodStart,
         currentPeriodEnd: remote.currentPeriodEnd,
+        gracePeriodEnd: graceUntil(remote.status, remote.currentPeriodEnd),
         cancelAtPeriodEnd: remote.cancelAtPeriodEnd,
       })
       auditRepository.record({
