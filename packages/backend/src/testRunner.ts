@@ -62,6 +62,7 @@ async function resetDb() {
     DELETE FROM sso_group_mappings;
     DELETE FROM sso_login_states;
     DELETE FROM groups;
+    DELETE FROM api_keys;
     DELETE FROM did_provisioning_reservations;
     DELETE FROM provisioned_dids;
     DELETE FROM usage_events;
@@ -886,8 +887,10 @@ async function main() {
         required: config.auth.required,
         localEnabled: config.auth.localEnabled,
         emailEnabled: config.email.notificationsEnabled,
+        sessionSecret: config.auth.sessionSecret,
       }
       config.selfRegistration.enabled = true
+      config.auth.sessionSecret = 'test-session-secret-not-the-public-default'
 
       const email = {
         async sendEmailVerification() {
@@ -904,6 +907,11 @@ async function main() {
       config.email.notificationsEnabled = false
       assert.throws(() => service.assertConfiguration(), /EMAIL_NOTIFICATIONS/)
       config.email.notificationsEnabled = true
+      config.auth.sessionSecret = 'comflow-dev-secret'
+      assert.throws(() => service.assertConfiguration(), /32 bytes/)
+      config.auth.sessionSecret = 'too-short'
+      assert.throws(() => service.assertConfiguration(), /32 bytes/)
+      config.auth.sessionSecret = 'test-session-secret-not-the-public-default'
       service.assertConfiguration()
       db.exec(`
         CREATE TEMP TRIGGER fail_self_registration_audit
@@ -938,6 +946,7 @@ async function main() {
         config.auth.required = previous.required
         config.auth.localEnabled = previous.localEnabled
         config.email.notificationsEnabled = previous.emailEnabled
+        config.auth.sessionSecret = previous.sessionSecret
       }
     }
   )
@@ -977,6 +986,7 @@ async function main() {
         emailEnabled: config.email.notificationsEnabled,
         emailTo: [...config.email.to],
         defaultMaxDids: config.defaultTenantLimits.maxDids,
+        sessionSecret: config.auth.sessionSecret,
       }
       config.selfRegistration.enabled = true
       config.auth.required = true
@@ -984,6 +994,7 @@ async function main() {
       config.email.notificationsEnabled = true
       config.email.to = ['owner@example.com']
       config.defaultTenantLimits.maxDids = 99
+      config.auth.sessionSecret = 'test-session-secret-not-the-public-default'
 
       const delivered = {
         verifications: [] as Array<{ email: string; token: string }>,
@@ -1151,6 +1162,63 @@ async function main() {
         config.email.notificationsEnabled = previous.emailEnabled
         config.email.to = previous.emailTo
         config.defaultTenantLimits.maxDids = previous.defaultMaxDids
+        config.auth.sessionSecret = previous.sessionSecret
+      }
+    }
+  )
+
+  await runTest(
+    'authentication and advertised recovery fail closed on unsafe configuration',
+    async () => {
+      const { config } = await import('./config.js')
+      const { AuthService } = await import('./services/authService.js')
+      const { PasswordResetService } = await import(
+        './services/passwordResetService.js'
+      )
+      const previous = {
+        required: config.auth.required,
+        localEnabled: config.auth.localEnabled,
+        emailEnabled: config.email.notificationsEnabled,
+        sessionSecret: config.auth.sessionSecret,
+        sessionTtlHours: config.auth.sessionTtlHours,
+        passwordResetTtlHours: config.auth.passwordResetTtlHours,
+      }
+
+      try {
+        const auth = new AuthService()
+        const recovery = new PasswordResetService(
+          { async sendPasswordReset() { return true } },
+          0
+        )
+        config.auth.required = true
+        config.auth.localEnabled = true
+        config.email.notificationsEnabled = true
+        config.auth.sessionSecret = 'comflow-dev-secret'
+        assert.throws(() => auth.assertConfiguration(), /32 bytes/)
+
+        config.auth.sessionSecret = 'test-session-secret-not-the-public-default'
+        config.auth.sessionTtlHours = 0
+        assert.throws(() => auth.assertConfiguration(), /TTL_HOURS/)
+        config.auth.sessionTtlHours = 24
+        auth.assertConfiguration()
+
+        assert.equal(recovery.enabled, true)
+        config.auth.passwordResetTtlHours = Number.NaN
+        assert.throws(() => recovery.assertConfiguration(), /RESET_TTL_HOURS/)
+        config.auth.passwordResetTtlHours = 2
+        recovery.assertConfiguration()
+
+        config.auth.required = false
+        assert.equal(recovery.enabled, false)
+        config.auth.passwordResetTtlHours = Number.NaN
+        recovery.assertConfiguration()
+      } finally {
+        config.auth.required = previous.required
+        config.auth.localEnabled = previous.localEnabled
+        config.email.notificationsEnabled = previous.emailEnabled
+        config.auth.sessionSecret = previous.sessionSecret
+        config.auth.sessionTtlHours = previous.sessionTtlHours
+        config.auth.passwordResetTtlHours = previous.passwordResetTtlHours
       }
     }
   )
@@ -1554,6 +1622,272 @@ async function main() {
       assert.equal(remove.response.status, 400)
     })
   })
+
+  await runTest(
+    'password recovery is single-use and revokes sessions plus API keys',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { PasswordResetService } = await import(
+        './services/passwordResetService.js'
+      )
+      const { userRepository } = await import(
+        './repositories/userRepository.js'
+      )
+      const { auditRepository } = await import(
+        './repositories/auditRepository.js'
+      )
+      const { apiKeyService } = await import('./services/apiKeyService.js')
+      const { hashPassword, verifyPassword } = await import(
+        './lib/password.js'
+      )
+      const { signSessionToken } = await import('./lib/token.js')
+      const { resolveSessionUser } = await import('./services/authService.js')
+      const { passwordResetUrl } = await import(
+        './services/emailNotificationService.js'
+      )
+
+      const previous = {
+        required: config.auth.required,
+        localEnabled: config.auth.localEnabled,
+        emailEnabled: config.email.notificationsEnabled,
+        sessionSecret: config.auth.sessionSecret,
+      }
+      config.auth.required = true
+      config.auth.localEnabled = true
+      config.email.notificationsEnabled = true
+      config.auth.sessionSecret = 'password-recovery-integration-secret'
+
+      try {
+        const tenantId = ensurePrimaryTenant(config.defaultTenant)
+        const resetUrl = passwordResetUrl('not-a-real-token')
+        assert.match(resetUrl, /\/reset-password#reset-token=/)
+        assert.equal(resetUrl.includes('?token='), false)
+        assert.equal(resetUrl.includes('#token='), false)
+        const sent: Array<{ email: string; token: string }> = []
+        const service = new PasswordResetService(
+          {
+            async sendPasswordReset(email: string, token: string) {
+              sent.push({ email, token })
+              return true
+            },
+          },
+          0
+        )
+        const local = userRepository.create({
+          email: 'reset-me@example.com',
+          displayName: 'Reset Me',
+          passwordHash: hashPassword('original-password'),
+          role: 'member',
+          tenantId,
+        })
+        const sso = userRepository.create({
+          email: 'sso-user@example.com',
+          displayName: 'SSO User',
+          passwordHash: null,
+          role: 'member',
+          tenantId,
+          authProvider: 'oidc',
+        })
+        const oldSession = signSessionToken(local.id, local.sessionEpoch)
+        const apiKey = apiKeyService.create(local.id, 'recovery test').plaintext
+        assert.equal(resolveSessionUser(oldSession)?.id, local.id)
+        assert.equal(apiKeyService.resolve(apiKey)?.user.id, local.id)
+
+        // Unknown and SSO identities receive the same no-op service behavior.
+        await service.request('nobody@example.com')
+        await service.request(sso.email)
+        assert.equal(sent.length, 0)
+
+        await service.request(local.email)
+        await service.request(local.email) // per-account cooldown preserves link 1
+        assert.equal(sent.length, 1)
+        const rawToken = sent[0]!.token
+        const stored = userRepository.getById(local.id)!
+        assert.ok(stored.passwordResetExpiresAt)
+        const tokenRow = (await getModules()).db
+          .prepare(
+            'SELECT password_reset_token AS token FROM users WHERE id = ?'
+          )
+          .get(local.id) as { token: string }
+        assert.notEqual(tokenRow.token, rawToken)
+        assert.equal(tokenRow.token.length, 64)
+
+        service.reset(rawToken, 'a-brand-new-password')
+        const updated = userRepository.getById(local.id)!
+        assert.ok(verifyPassword('a-brand-new-password', updated.passwordHash!))
+        assert.equal(resolveSessionUser(oldSession), null)
+        assert.equal(apiKeyService.resolve(apiKey), null)
+        assert.equal(
+          resolveSessionUser(
+            signSessionToken(updated.id, updated.sessionEpoch)
+          )?.id,
+          updated.id
+        )
+        assert.throws(
+          () => service.reset(rawToken, 'yet-another-password'),
+          /Invalid or expired/
+        )
+        const actions = auditRepository
+          .listByTenant(tenantId)
+          .map(entry => entry.action)
+        assert.ok(actions.includes('password.reset_requested'))
+        assert.ok(actions.includes('password.reset_completed'))
+      } finally {
+        config.auth.required = previous.required
+        config.auth.localEnabled = previous.localEnabled
+        config.email.notificationsEnabled = previous.emailEnabled
+        config.auth.sessionSecret = previous.sessionSecret
+      }
+    }
+  )
+
+  await runTest(
+    'password change revokes older sessions and replaces the current token',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { userRepository } = await import(
+        './repositories/userRepository.js'
+      )
+      const { hashPassword } = await import('./lib/password.js')
+      const { signSessionToken } = await import('./lib/token.js')
+      const previous = {
+        required: config.auth.required,
+        sessionSecret: config.auth.sessionSecret,
+      }
+      config.auth.required = true
+      config.auth.sessionSecret = 'password-change-integration-secret'
+
+      try {
+        const tenantId = ensurePrimaryTenant(config.defaultTenant)
+        const local = userRepository.create({
+          email: 'change-me@example.com',
+          displayName: 'Change Me',
+          passwordHash: hashPassword('original-password'),
+          role: 'member',
+          tenantId,
+        })
+        const oldToken = signSessionToken(local.id, local.sessionEpoch)
+
+        await withServer(async baseUrl => {
+          const changed = await requestJson(baseUrl, '/api/me/password', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${oldToken}` },
+            body: JSON.stringify({
+              currentPassword: 'original-password',
+              newPassword: 'replacement-password',
+            }),
+          })
+          assert.equal(changed.response.status, 200)
+          const newToken = String(changed.body?.token)
+          assert.ok(newToken && newToken !== oldToken)
+
+          const oldMe = await requestJson(baseUrl, '/api/me', {
+            headers: { Authorization: `Bearer ${oldToken}` },
+          })
+          assert.equal(oldMe.response.status, 401)
+          const newMe = await requestJson(baseUrl, '/api/me', {
+            headers: { Authorization: `Bearer ${newToken}` },
+          })
+          assert.equal(newMe.response.status, 200)
+        })
+      } finally {
+        config.auth.required = previous.required
+        config.auth.sessionSecret = previous.sessionSecret
+      }
+    }
+  )
+
+  await runTest(
+    'admin password reset revokes sessions, reset links, and API keys',
+    async () => {
+      const { ensurePrimaryTenant } = await getModules()
+      const { config } = await import('./config.js')
+      const { PasswordResetService } = await import(
+        './services/passwordResetService.js'
+      )
+      const { userRepository } = await import(
+        './repositories/userRepository.js'
+      )
+      const { apiKeyService } = await import('./services/apiKeyService.js')
+      const { hashPassword } = await import('./lib/password.js')
+      const { signSessionToken } = await import('./lib/token.js')
+      const { resolveSessionUser } = await import('./services/authService.js')
+      const previous = {
+        required: config.auth.required,
+        localEnabled: config.auth.localEnabled,
+        emailEnabled: config.email.notificationsEnabled,
+        sessionSecret: config.auth.sessionSecret,
+      }
+      config.auth.required = true
+      config.auth.localEnabled = true
+      config.email.notificationsEnabled = true
+      config.auth.sessionSecret = 'admin-reset-integration-secret-32-bytes'
+
+      try {
+        const tenantId = ensurePrimaryTenant(config.defaultTenant)
+        const admin = userRepository.create({
+          email: 'reset-admin@example.com',
+          displayName: 'Reset Admin',
+          passwordHash: hashPassword('admin-password'),
+          role: 'admin',
+          tenantId,
+        })
+        const target = userRepository.create({
+          email: 'admin-reset-target@example.com',
+          displayName: 'Reset Target',
+          passwordHash: hashPassword('original-password'),
+          role: 'member',
+          tenantId,
+        })
+        const oldSession = signSessionToken(target.id, target.sessionEpoch)
+        const oldApiKey = apiKeyService.create(target.id, 'old key').plaintext
+        const sent: string[] = []
+        const recovery = new PasswordResetService(
+          {
+            async sendPasswordReset(_email: string, token: string) {
+              sent.push(token)
+              return true
+            },
+          },
+          0
+        )
+        await recovery.request(target.email)
+        assert.equal(sent.length, 1)
+
+        await withServer(async baseUrl => {
+          const response = await requestJson(
+            baseUrl,
+            `/api/users/${target.id}/password`,
+            {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${signSessionToken(
+                  admin.id,
+                  admin.sessionEpoch
+                )}`,
+              },
+              body: JSON.stringify({ password: 'admin-replacement-password' }),
+            }
+          )
+          assert.equal(response.response.status, 204)
+        })
+
+        assert.equal(resolveSessionUser(oldSession), null)
+        assert.equal(apiKeyService.resolve(oldApiKey), null)
+        assert.throws(
+          () => recovery.reset(sent[0]!, 'stale-link-password'),
+          /Invalid or expired/
+        )
+      } finally {
+        config.auth.required = previous.required
+        config.auth.localEnabled = previous.localEnabled
+        config.email.notificationsEnabled = previous.emailEnabled
+        config.auth.sessionSecret = previous.sessionSecret
+      }
+    }
+  )
 
   await runTest('reviewing a call records who reviewed it', async () => {
     await withServer(async baseUrl => {

@@ -4,7 +4,10 @@ import {
   RegisterResponse,
   User,
 } from '../../../shared/src/index.js'
-import { config } from '../config.js'
+import {
+  config,
+  isSecureSessionSecret,
+} from '../config.js'
 import { db } from '../db/client.js'
 import { HttpError } from '../lib/errors.js'
 import { hashPassword } from '../lib/password.js'
@@ -90,6 +93,11 @@ export class RegistrationService {
     if (!config.email.notificationsEnabled) {
       throw new Error(
         'Self-registration requires COMFLOW_EMAIL_NOTIFICATIONS_ENABLED=true for email verification.'
+      )
+    }
+    if (!isSecureSessionSecret(config.auth.sessionSecret)) {
+      throw new Error(
+        'Self-registration requires a non-placeholder AUTH_SESSION_SECRET of at least 32 bytes.'
       )
     }
     if (config.selfRegistration.plan !== 'solo') {
@@ -178,7 +186,7 @@ export class RegistrationService {
       'email.verification_sent'
     )
     return {
-      token: signSessionToken(result.record.id),
+      token: signSessionToken(result.record.id, result.record.sessionEpoch),
       user: toApiUser(result.record),
       tenant: result.tenant,
       verificationRequired: true,

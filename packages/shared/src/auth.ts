@@ -23,7 +23,7 @@ export const UserSchema = z.object({
 
 export const LoginRequestSchema = z.object({
   email: z.string().trim().email(),
-  password: z.string().min(1),
+  password: z.string().min(1).max(200),
 })
 
 export const LoginResponseSchema = z.object({
@@ -64,6 +64,26 @@ export const ResendVerificationResponseSchema = z.object({
   accepted: z.literal(true),
 })
 
+export const ForgotPasswordRequestSchema = z.object({
+  email: z.string().trim().email(),
+})
+
+export const ForgotPasswordResponseSchema = z.object({
+  // Always true so this endpoint cannot be used to enumerate accounts.
+  accepted: z.literal(true),
+})
+
+// Distinct from users.ts's admin-only ResetPasswordRequestSchema. This one
+// consumes a random, emailed, single-use token.
+export const CompletePasswordResetRequestSchema = z.object({
+  token: z.string().trim().min(1).max(128),
+  password: z.string().min(8).max(200),
+})
+
+export const CompletePasswordResetResponseSchema = z.object({
+  ok: z.literal(true),
+})
+
 export const SsoProviderInfoSchema = z.object({
   id: z.enum(['oidc', 'saml']),
   label: z.string(),
@@ -80,12 +100,15 @@ export const MeResponseSchema = z.object({
   providers: z.array(SsoProviderInfoSchema),
   // True when the login screen should offer "Create account" (hosted mode).
   selfRegistrationEnabled: z.boolean().default(false),
+  // True only when local auth and SMTP notifications can deliver reset links.
+  passwordResetEnabled: z.boolean().default(false),
 })
 
 export const AuthProvidersResponseSchema = z.object({
   localEnabled: z.boolean(),
   providers: z.array(SsoProviderInfoSchema),
   selfRegistrationEnabled: z.boolean().default(false),
+  passwordResetEnabled: z.boolean().default(false),
 })
 
 export type UserRole = z.infer<typeof UserRoleSchema>
@@ -98,6 +121,13 @@ export type ResendVerificationRequest = z.infer<
 >
 export type ResendVerificationResponse = z.infer<
   typeof ResendVerificationResponseSchema
+>
+export type ForgotPasswordRequest = z.infer<typeof ForgotPasswordRequestSchema>
+export type ForgotPasswordResponse = z.infer<
+  typeof ForgotPasswordResponseSchema
+>
+export type CompletePasswordResetRequest = z.infer<
+  typeof CompletePasswordResetRequestSchema
 >
 export type SsoProviderInfo = z.infer<typeof SsoProviderInfoSchema>
 export type AuthProvidersResponse = z.infer<typeof AuthProvidersResponseSchema>

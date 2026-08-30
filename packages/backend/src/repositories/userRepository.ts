@@ -15,6 +15,10 @@ type UserRow = {
   email_verification_token: string | null
   email_verification_expires_at: string | null
   self_registered_at: string | null
+  password_reset_token: string | null
+  password_reset_expires_at: string | null
+  password_reset_requested_at: string | null
+  session_epoch: number
   created_at: string
   updated_at: string
 }
@@ -25,6 +29,9 @@ export type UserRecord = User & {
   emailVerifiedAt: string | null
   emailVerificationExpiresAt: string | null
   selfRegisteredAt: string | null
+  passwordResetExpiresAt: string | null
+  passwordResetRequestedAt: string | null
+  sessionEpoch: number
 }
 
 function mapRow(row: UserRow): UserRecord {
@@ -44,6 +51,9 @@ function mapRow(row: UserRow): UserRecord {
     emailVerifiedAt: row.email_verified_at,
     emailVerificationExpiresAt: row.email_verification_expires_at,
     selfRegisteredAt: row.self_registered_at,
+    passwordResetExpiresAt: row.password_reset_expires_at,
+    passwordResetRequestedAt: row.password_reset_requested_at,
+    sessionEpoch: row.session_epoch ?? 0,
   }
 }
 
@@ -112,6 +122,10 @@ export const userRepository = {
         ? null
         : input.verificationExpiresAt ?? null,
       self_registered_at: input.selfRegistered ? now : null,
+      password_reset_token: null,
+      password_reset_expires_at: null,
+      password_reset_requested_at: null,
+      session_epoch: 0,
       created_at: now,
       updated_at: now,
     }
@@ -119,11 +133,15 @@ export const userRepository = {
       INSERT INTO users (
         id, email, display_name, password_hash, role, auth_provider, external_id, tenant_id,
         email_verified_at, email_verification_token, email_verification_expires_at,
-        self_registered_at, created_at, updated_at
+        self_registered_at, password_reset_token, password_reset_expires_at,
+        password_reset_requested_at,
+        session_epoch, created_at, updated_at
       )
       VALUES (@id, @email, @display_name, @password_hash, @role, @auth_provider, @external_id, @tenant_id,
         @email_verified_at, @email_verification_token, @email_verification_expires_at,
-        @self_registered_at, @created_at, @updated_at)
+        @self_registered_at, @password_reset_token, @password_reset_expires_at,
+        @password_reset_requested_at,
+        @session_epoch, @created_at, @updated_at)
     `).run(row)
     return mapRow(row)
   },
@@ -158,6 +176,46 @@ export const userRepository = {
           email_verification_expires_at = NULL, updated_at = ?
       WHERE id = ?
     `).run(now, now, id)
+  },
+
+  getByPasswordResetTokenHash(tokenHash: string): UserRecord | null {
+    const row = db
+      .prepare('SELECT * FROM users WHERE password_reset_token = ?')
+      .get(tokenHash) as UserRow | undefined
+    return row ? mapRow(row) : null
+  },
+
+  reservePasswordReset(
+    id: string,
+    input: { tokenHash: string; expiresAt: string; notAfter: string }
+  ): boolean {
+    const now = new Date().toISOString()
+    const result = db.prepare(`
+      UPDATE users
+      SET password_reset_token = ?, password_reset_expires_at = ?,
+          password_reset_requested_at = ?, updated_at = ?
+      WHERE id = ? AND (
+        password_reset_requested_at IS NULL OR password_reset_requested_at <= ?
+      )
+    `).run(input.tokenHash, input.expiresAt, now, now, id, input.notAfter)
+    return result.changes === 1
+  },
+
+  clearPasswordReset(id: string): void {
+    db.prepare(`
+      UPDATE users
+      SET password_reset_token = NULL, password_reset_expires_at = NULL,
+          updated_at = ?
+      WHERE id = ?
+    `).run(new Date().toISOString(), id)
+  },
+
+  /** Invalidates every session token issued against an earlier epoch. */
+  bumpSessionEpoch(id: string): void {
+    db.prepare(`
+      UPDATE users SET session_epoch = session_epoch + 1, updated_at = ?
+      WHERE id = ?
+    `).run(new Date().toISOString(), id)
   },
 
   setRole(id: string, role: UserRole): void {
@@ -219,10 +277,15 @@ export const userRepository = {
     return this.getById(id)
   },
 
-  setPassword(id: string, passwordHash: string): void {
-    db.prepare(
-      'UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?'
-    ).run(passwordHash, new Date().toISOString(), id)
+  /** Replace the password and invalidate every older session/reset grant. */
+  replacePassword(id: string, passwordHash: string): void {
+    db.prepare(`
+      UPDATE users
+      SET password_hash = ?, password_reset_token = NULL,
+          password_reset_expires_at = NULL,
+          session_epoch = session_epoch + 1, updated_at = ?
+      WHERE id = ?
+    `).run(passwordHash, new Date().toISOString(), id)
   },
 
   remove(id: string): boolean {

@@ -39,6 +39,7 @@ import { UsageService } from './services/usageService.js'
 import { EmailNotificationService } from './services/emailNotificationService.js'
 import { EngineService } from './services/engineService.js'
 import { MailboxService } from './services/mailboxService.js'
+import { PasswordResetService } from './services/passwordResetService.js'
 import { RegistrationService } from './services/registrationService.js'
 import { ScheduledCallService } from './services/scheduledCallService.js'
 import { SsoService } from './services/ssoService.js'
@@ -46,6 +47,8 @@ import { TelephonyGatewayService } from './services/telephonyGatewayService.js'
 import { apiKeyService } from './services/apiKeyService.js'
 import { callRepository } from './repositories/callRepository.js'
 import { groupRepository } from './repositories/groupRepository.js'
+import { apiKeyRepository } from './repositories/apiKeyRepository.js'
+import { auditRepository } from './repositories/auditRepository.js'
 import { userRepository } from './repositories/userRepository.js'
 import { accessService } from './services/accessService.js'
 import { toApiUser } from './services/authService.js'
@@ -76,6 +79,9 @@ export function createApp(): ComFlowApp {
   const authService = new AuthService()
   const ssoService = new SsoService()
   const registrationService = new RegistrationService(emailNotificationService)
+  const passwordResetService = new PasswordResetService(emailNotificationService)
+  authService.assertConfiguration()
+  passwordResetService.assertConfiguration()
   registrationService.assertConfiguration()
   billingService.assertHostedConfiguration()
   // Ensure the primary tenant exists and back-fill pre-tenancy rows onto it,
@@ -245,7 +251,16 @@ export function createApp(): ComFlowApp {
         if (!existing || existing.tenantId !== user.tenantId) {
           throw new HttpError(404, 'User not found.')
         }
-        userRepository.setPassword(id, hashPassword(password))
+        db.transaction(() => {
+          userRepository.replacePassword(id, hashPassword(password))
+          const apiKeysRevoked = apiKeyRepository.removeAllForUser(id)
+          auditRepository.record({
+            actor: user.id,
+            action: 'user.password_reset_by_admin',
+            tenantId: existing.tenantId,
+            detail: { userId: id, apiKeysRevoked, via: 'mcp' },
+          })
+        })()
       },
       delete(id, currentUser) {
         const existing = userRepository.getById(id)
@@ -438,7 +453,12 @@ export function createApp(): ComFlowApp {
   app.use('/api/health', createHealthRouter(engineService))
   app.use(
     '/api/auth',
-    createAuthRouter(authService, ssoService, registrationService)
+    createAuthRouter(
+      authService,
+      ssoService,
+      registrationService,
+      passwordResetService
+    )
   )
   app.use(
     '/api/webhooks',

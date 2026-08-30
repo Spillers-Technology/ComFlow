@@ -23,6 +23,7 @@ export function LoginPage() {
     localEnabled,
     providers,
     selfRegistrationEnabled,
+    passwordResetEnabled,
     ssoError,
   } = useAuth()
   const location = useLocation()
@@ -116,6 +117,16 @@ export function LoginPage() {
                 >
                   {submitting ? 'Signing in…' : 'Sign in'}
                 </Button>
+                {passwordResetEnabled && (
+                  <Button
+                    component={RouterLink}
+                    to="/forgot-password"
+                    variant="text"
+                    size="small"
+                  >
+                    Forgot your password?
+                  </Button>
+                )}
               </Stack>
             )}
 

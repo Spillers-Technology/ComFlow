@@ -6,9 +6,12 @@ import {
   User,
 } from '../../../shared/src/index.js'
 import { HttpError } from '../lib/errors.js'
+import { db } from '../db/client.js'
 import { asyncHandler, parseBody } from '../lib/http.js'
 import { hashPassword, verifyPassword } from '../lib/password.js'
+import { signSessionToken } from '../lib/token.js'
 import { userRepository } from '../repositories/userRepository.js'
+import { auditRepository } from '../repositories/auditRepository.js'
 import { apiKeyService } from '../services/apiKeyService.js'
 import { toApiUser } from '../services/authService.js'
 import { RegistrationService } from '../services/registrationService.js'
@@ -72,8 +75,21 @@ export function createMeRouter(registrationService: RegistrationService) {
         throw new HttpError(400, 'Current password is incorrect.')
       }
 
-      userRepository.setPassword(existing.id, hashPassword(input.newPassword))
-      response.status(204).end()
+      db.transaction(() => {
+        userRepository.replacePassword(
+          existing.id,
+          hashPassword(input.newPassword)
+        )
+        auditRepository.record({
+          actor: existing.id,
+          action: 'password.changed',
+          tenantId: existing.tenantId,
+        })
+      })()
+      const updated = userRepository.getById(existing.id)!
+      response.json({
+        token: signSessionToken(updated.id, updated.sessionEpoch),
+      })
     })
   )
 

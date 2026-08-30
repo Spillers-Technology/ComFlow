@@ -91,4 +91,9 @@ export const apiKeyRepository = {
       .run(id, userId)
     return result.changes > 0
   },
+
+  removeAllForUser(userId: string): number {
+    return db.prepare('DELETE FROM api_keys WHERE user_id = ?').run(userId)
+      .changes
+  },
 }

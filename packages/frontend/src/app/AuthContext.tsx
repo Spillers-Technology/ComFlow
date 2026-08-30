@@ -43,6 +43,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authRequired, setAuthRequired] = useState(false)
   const [localEnabled, setLocalEnabled] = useState(true)
   const [selfRegistrationEnabled, setSelfRegistrationEnabled] = useState(false)
+  const [passwordResetEnabled, setPasswordResetEnabled] = useState(false)
   const [providers, setProviders] = useState<SsoProviderInfo[]>([])
   const [ssoError, setSsoError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -58,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setSelfRegistrationEnabled(
         me.selfRegistrationEnabled && me.localEnabled
       )
+      setPasswordResetEnabled(me.passwordResetEnabled && me.localEnabled)
       setProviders(me.providers)
     } catch {
       setUser(null)
@@ -108,6 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authRequired,
       localEnabled,
       selfRegistrationEnabled,
+      passwordResetEnabled,
       providers,
       ssoError,
       loading,
@@ -122,6 +125,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authRequired,
       localEnabled,
       selfRegistrationEnabled,
+      passwordResetEnabled,
       providers,
       ssoError,
       loading,

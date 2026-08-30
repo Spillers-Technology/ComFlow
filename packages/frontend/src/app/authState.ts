@@ -11,6 +11,7 @@ export interface AuthState {
   authRequired: boolean
   localEnabled: boolean
   selfRegistrationEnabled: boolean
+  passwordResetEnabled: boolean
   providers: SsoProviderInfo[]
   ssoError: string | null
   loading: boolean

@@ -177,7 +177,8 @@ Playwright setup).
 ## API surface
 
 Open: `GET /api/health`, `POST /api/auth/login`, `POST /api/auth/register`,
-`POST /api/auth/{verify-email,resend-verification}`, `GET /api/auth/me`,
+`POST /api/auth/{verify-email,resend-verification,forgot-password,reset-password}`,
+`GET /api/auth/me`,
 `GET /api/auth/providers`, `GET /api/auth/sso/{provider}/start`,
 `GET /api/auth/oidc/callback`, `POST /api/auth/saml/acs`,
 `POST /api/webhooks/telephony/{inbound,recording-complete}`.
@@ -238,7 +239,10 @@ All env vars are documented in [.env.example](.env.example). Highlights:
 - **Email notifications**: `COMFLOW_EMAIL_NOTIFICATIONS_ENABLED`,
   `COMFLOW_SMTP_*`, `COMFLOW_NOTIFICATION_EMAIL_{FROM,TO}`. Defaults are
   local-Postfix friendly (`127.0.0.1:25`, no auth/TLS unless configured).
-- **Auth**: `COMFLOW_AUTH_REQUIRED` (default `false`), `AUTH_SESSION_SECRET`/TTL,
+- **Auth**: `COMFLOW_AUTH_REQUIRED` (default `false`), `AUTH_SESSION_SECRET`/TTL.
+  Auth-required deployments fail startup unless the signing secret is
+  non-placeholder and at least 32 bytes. Other controls:
+  `COMFLOW_PASSWORD_RESET_TTL_HOURS`,
   `COMFLOW_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD}`, `AUTH_LOCAL_ENABLED`,
   `AUTH_ADMIN_EMAILS` (promote-to-admin-on-SSO-login allowlist).
 - **Public self-registration**: `COMFLOW_SELF_REGISTRATION=true` enables the

@@ -89,7 +89,8 @@ features.
 
 | Order | Unit | Includes | Explicitly excludes | Merge gate |
 |---|---|---|---|---|
-| 1 | Identity recovery | Password reset, TOTP enrollment/challenge/recovery, session revocation, email-token primitives | Plans, Stripe, SIP, support/refunds, outbound | Release-container auth matrix plus adversarial token/session review |
+| 1A | Identity recovery | Password reset, session and API-key revocation, email-token primitives | MFA, plans, Stripe, SIP, support/refunds, outbound | Release-container recovery matrix plus adversarial token/session review |
+| 1B | Multi-factor authentication | TOTP enrollment, durable single-use login challenges, code-replay protection, recovery-code lifecycle | Password reset, billing, SIP, outbound | Authenticator/recovery matrix plus concurrent replay tests |
 | 2 | Subscription lifecycle | Plan catalog, Stripe Checkout/Portal/webhooks, durable pending-checkout guard, subscription state and limits | Mandatory second wallet payment, support/refunds, SIP packaging, outbound | Complete Stripe test lifecycle and exact reconciliation |
 | 3 | Inbound service enforcement | Subscription grants DID, included allowance grants first DID, real SIP-edge image/config, inbound duration/concurrency enforcement | Scheduled outbound and outbound access requests | Three real disposable signup-to-first-voicemail runs |
 | 4 | Customer lifecycle and operator support | Billing diagnosis, adjustment/refund audit, cancellation, DID release, export/deletion, support signals | New plan tiers or outbound enablement | Tenant-safe lifecycle tests and rehearsed support paths |
@@ -100,6 +101,11 @@ The old draft remains useful as a source artifact until each retained hunk has a
 reviewed destination. Close it only after the replacement PRs link back to this
 map and abandoned code is named explicitly; do not let “split” become an
 unreviewed copy of the same change across several branches.
+
+The original draft's MFA implementation is not the 1B baseline: review found
+replayable five-minute login challenges, no protection against reusing a TOTP
+within its accepted time step, and a concurrent recovery-code reuse edge. Unit
+1B must close those failure modes rather than copying the existing hunks.
 
 The release-container recovery drill found that ComFlow did not exit inside a
 10-second SIGTERM grace period and was killed. The bounded shutdown fix stops
