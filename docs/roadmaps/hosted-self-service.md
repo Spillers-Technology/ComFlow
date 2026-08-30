@@ -52,10 +52,11 @@ These are product-owner decisions, not implementation details:
    unsupported carriers; do not infer carrier behavior from a phone number.
 4. **Data contract.** Set and publish recording/transcript retention, export,
    deletion, cancellation, refund, and post-cancellation access behavior.
-5. **Rights and trust.** Resolve the repository's no-license/"open source"
-   contradiction before public beta. Publish privacy, terms, support, security
-   reporting, and subprocessors appropriate for a service handling recordings.
-   Qualified legal review is external to this engineering roadmap.
+5. **Rights and trust.** The repository's no-license/"open source" contradiction
+   is resolved: ComFlow is MIT-licensed (`LICENSE`, README, and landing page all
+   agree). Still needed before public beta: publish privacy, terms, support,
+   security reporting, and subprocessors appropriate for a service handling
+   recordings. Qualified legal review is external to this engineering roadmap.
 
 ## Milestones
 

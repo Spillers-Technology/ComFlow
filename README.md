@@ -8,6 +8,7 @@ golden inbox to triage, and pushes the calls worth acting on into
 [![Release](https://img.shields.io/github/v/release/Spillers-Technology/ComFlow)](https://github.com/Spillers-Technology/ComFlow/releases/latest)
 [![Container image](https://img.shields.io/badge/ghcr.io-spillers--technology%2Fcomflow-blue?logo=docker)](https://github.com/Spillers-Technology/ComFlow/pkgs/container/comflow)
 [![CI](https://github.com/Spillers-Technology/ComFlow/actions/workflows/nodejs-ci.yml/badge.svg)](https://github.com/Spillers-Technology/ComFlow/actions/workflows/nodejs-ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Current release: v4.0.0.**
 
@@ -338,6 +339,15 @@ and first-response steps if something sensitive is exposed.
 Found a sharp edge or want to add a provider? Issues and focused pull requests
 are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers scope, synthetic caller
 data, local checks, and what makes a useful review.
+
+## License
+
+ComFlow is open source under the [MIT License](LICENSE), copyright Spillers
+Technology. The SIP edge builds on [baresip](https://github.com/baresip/baresip)
+(BSD-3-Clause), fetched from its own upstream repository at container-build
+time (see [infra/baresip](infra/baresip)) rather than vendored into this repo;
+it is not bundled or modified here and imposes no additional terms on ComFlow
+itself.
 
 ## Short version
 
