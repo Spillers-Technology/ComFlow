@@ -156,6 +156,30 @@ export const config = {
     cancelUrl:
       readOptionalEnv('STRIPE_CANCEL_URL') ??
       `${process.env.FRONTEND_ORIGIN ?? 'http://localhost:5173'}/billing?status=cancel`,
+    // The one sellable plan (roadmap M0/M1: "sell one number and voicemail
+    // capture first" — no multi-tier plan system yet). Capacity mirrors
+    // COMFLOW_SELF_REGISTRATION_* exactly rather than duplicating those
+    // numbers; only pricing is new. $29/mo is a placeholder an operator sets
+    // for real before public beta, not a pricing decision made here.
+    subscriptionPlan: {
+      id: 'solo',
+      name: 'Solo',
+      description:
+        'One phone number, inbound voicemail capture, and included minutes for one person.',
+      priceCents: Number(process.env.COMFLOW_SOLO_PLAN_PRICE_CENTS ?? 2900),
+      currency: 'usd' as const,
+      interval: 'month' as const,
+      // The Stripe Price id this plan's Checkout sessions bill against. Unset
+      // in this sandbox (no live Stripe product/price exists); required once
+      // COMFLOW_BILLING_PROVIDER=stripe is selected.
+      stripePriceId: readOptionalEnv('STRIPE_SOLO_PRICE_ID'),
+    },
+    // A failed renewal remains usable for this bounded interval while the
+    // customer fixes their payment method. Stripe remains authoritative for
+    // recovery to active or progression to unpaid/canceled.
+    subscriptionGraceDays: Number(
+      process.env.COMFLOW_SUBSCRIPTION_GRACE_DAYS ?? 7
+    ),
   },
   secrets: {
     openaiApiKey: readEnv('COMFLOW_OPENAI_API_KEY', 'OPENAI_API_KEY'),
