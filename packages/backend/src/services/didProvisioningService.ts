@@ -64,9 +64,12 @@ export class DidProvisioningService {
     let orderedNumber: string | null = null
     let committed = false
     try {
-      // A DID rents monthly against the wallet — require settled funds before
-      // ordering. Paid fake-provider tenants exercise this exact same gate.
-      this.billingService.assertHasBalance(tenantId)
+      // One charge to start (docs/roadmaps/hosted-self-service.md, "product
+      // contract to settle first" #1): an active subscription grants the
+      // plan's DID directly. A tenant without one falls back to the wallet
+      // balance gate, which also stays the enforcement point for usage
+      // overage once a subscriber exhausts included minutes.
+      this.billingService.assertCanProvisionDid(tenantId)
       const existingMailboxId = this.validateTargetMailbox(tenantId, input)
       const ordered = await this.provider.orderDid(input.number)
       orderedNumber = ordered.number

@@ -11,6 +11,7 @@ import { usageRepository } from '../repositories/usageRepository.js'
 import { userRepository } from '../repositories/userRepository.js'
 import { BillingProvider, createBillingProvider } from '../providers/billing/index.js'
 import { EmailNotificationService } from './emailNotificationService.js'
+import { SubscriptionService } from './subscriptionService.js'
 
 type BillingEmailSender = Pick<
   EmailNotificationService,
@@ -22,12 +23,22 @@ type BillingEmailSender = Pick<
  * usage (UsageService) draws it down. balanceCents = creditCents - billedCents.
  * The single Stripe account collects all tenants' payments, matching the shared
  * VoIP.ms account model.
+ *
+ * Subscriptions (recurring, plan-granting) are a separate concern owned by
+ * `SubscriptionService`, composed here so webhook dispatch and event-id
+ * idempotency (`billingRepository.markEventProcessed`) stay in one place
+ * instead of being duplicated across two webhook handlers.
  */
 export class BillingService {
+  readonly subscriptions: SubscriptionService
+
   constructor(
     private readonly provider: BillingProvider = createBillingProvider(),
-    private readonly emailService: BillingEmailSender = new EmailNotificationService()
-  ) {}
+    private readonly emailService: BillingEmailSender = new EmailNotificationService(),
+    subscriptions?: SubscriptionService
+  ) {
+    this.subscriptions = subscriptions ?? new SubscriptionService(this.provider)
+  }
 
   wallet(tenantId: string): Wallet {
     const billing = billingRepository.get(tenantId)
@@ -57,6 +68,18 @@ export class BillingService {
     if (this.balanceCents(tenantId) <= 0) {
       throw new HttpError(402, 'Wallet balance exhausted. Add funds to continue.')
     }
+  }
+
+  /**
+   * Gate for DID provisioning (contract: "one charge to start" — see
+   * docs/roadmaps/hosted-self-service.md). An active/trialing subscription
+   * grants the plan's DID on its own; a tenant without one falls back to the
+   * existing wallet-balance gate, which is also how usage overage stays
+   * enforced once a subscriber exhausts included minutes.
+   */
+  assertCanProvisionDid(tenantId: string): void {
+    if (this.subscriptions.isUsable(tenantId)) return
+    this.assertHasBalance(tenantId)
   }
 
   assertHostedConfiguration(): void {
@@ -143,6 +166,10 @@ export class BillingService {
       return
     }
 
+    // payment_succeeded always carries tenantId directly (from Checkout
+    // session metadata); every other event type may only carry the provider
+    // customer id and needs the reverse lookup — dispute webhooks always did,
+    // and every subscription/invoice event now works the same way.
     const tenantId =
       event.type === 'payment_succeeded'
         ? event.tenantId
@@ -151,7 +178,7 @@ export class BillingService {
             ? billingRepository.tenantIdByCustomer(event.customerId)
             : null)
     if (!tenantId) {
-      // Do not mark an unresolved dispute processed. Returning an error asks
+      // Do not mark an unresolved event processed. Returning an error asks
       // Stripe to retry after its customer mapping is repaired.
       throw new Error('Billing event could not be mapped to a tenant.')
     }
@@ -206,26 +233,33 @@ export class BillingService {
         return
       }
 
-      const tenant = tenantRepository.update(tenantId, { status: 'suspended' })!
-      const reason = `Payment dispute (chargeback) of $${(
-        event.amountCents / 100
-      ).toFixed(2)}`
-      auditRepository.record({
-        actor: 'system:billing-webhook',
-        action: 'tenant.freeze',
-        tenantId,
-        detail: {
-          reason: 'payment_disputed',
-          amountCents: event.amountCents,
+      if (event.type === 'payment_disputed') {
+        const tenant = tenantRepository.update(tenantId, { status: 'suspended' })!
+        const reason = `Payment dispute (chargeback) of $${(
+          event.amountCents / 100
+        ).toFixed(2)}`
+        auditRepository.record({
+          actor: 'system:billing-webhook',
+          action: 'tenant.freeze',
+          tenantId,
+          detail: {
+            reason: 'payment_disputed',
+            amountCents: event.amountCents,
+            eventId: event.id,
+          },
+        })
+        billingAlertRepository.enqueue({
           eventId: event.id,
-        },
-      })
-      billingAlertRepository.enqueue({
-        eventId: event.id,
-        tenantId,
-        tenantName: tenant.name,
-        reason,
-      })
+          tenantId,
+          tenantName: tenant.name,
+          reason,
+        })
+        return
+      }
+
+      // subscription_active | subscription_updated | subscription_payment_failed
+      // | subscription_canceled
+      this.subscriptions.applyEvent(tenantId, event)
     })()
 
     await this.flushPendingAlerts()
