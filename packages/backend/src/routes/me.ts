@@ -1,7 +1,10 @@
 import { Router } from 'express'
 import {
+  BeginMfaEnrollmentRequestSchema,
   ChangePasswordSchema,
   CreateApiKeyRequestSchema,
+  DisableMfaRequestSchema,
+  MfaConfirmRequestSchema,
   UpdateProfileSchema,
   User,
 } from '../../../shared/src/index.js'
@@ -14,6 +17,7 @@ import { userRepository } from '../repositories/userRepository.js'
 import { auditRepository } from '../repositories/auditRepository.js'
 import { apiKeyService } from '../services/apiKeyService.js'
 import { toApiUser } from '../services/authService.js'
+import { MfaService } from '../services/mfaService.js'
 import { RegistrationService } from '../services/registrationService.js'
 
 function requireCurrentRecord(user: User) {
@@ -30,7 +34,10 @@ function requireParam(value: string | string[] | undefined, label: string) {
   return id
 }
 
-export function createMeRouter(registrationService: RegistrationService) {
+export function createMeRouter(
+  registrationService: RegistrationService,
+  mfaService: MfaService
+) {
   const router = Router()
 
   router.get(
@@ -87,6 +94,57 @@ export function createMeRouter(registrationService: RegistrationService) {
         })
       })()
       const updated = userRepository.getById(existing.id)!
+      response.json({
+        token: signSessionToken(updated.id, updated.sessionEpoch),
+      })
+    })
+  )
+
+  router.get(
+    '/mfa',
+    asyncHandler((_request, response) => {
+      const existing = requireCurrentRecord(response.locals.user as User)
+      response.json({
+        enabled: Boolean(existing.totpEnabledAt),
+        recoveryCodesRemaining: existing.totpEnabledAt
+          ? mfaService.recoveryCodeCount(existing.id)
+          : null,
+      })
+    })
+  )
+
+  router.post(
+    '/mfa/enroll',
+    asyncHandler((request, response) => {
+      const existing = requireCurrentRecord(response.locals.user as User)
+      const input = parseBody(BeginMfaEnrollmentRequestSchema, request.body)
+      response.json(mfaService.beginEnrollment(existing.id, input.password))
+    })
+  )
+
+  router.post(
+    '/mfa/confirm',
+    asyncHandler((request, response) => {
+      const existing = requireCurrentRecord(response.locals.user as User)
+      const input = parseBody(MfaConfirmRequestSchema, request.body)
+      const result = mfaService.confirmEnrollment(existing.id, input.code)
+      response.json({
+        recoveryCodes: result.recoveryCodes,
+        token: signSessionToken(result.record.id, result.record.sessionEpoch),
+      })
+    })
+  )
+
+  router.delete(
+    '/mfa',
+    asyncHandler((request, response) => {
+      const existing = requireCurrentRecord(response.locals.user as User)
+      const input = parseBody(DisableMfaRequestSchema, request.body)
+      const updated = mfaService.disable(
+        existing.id,
+        input.password,
+        input.code
+      )
       response.json({
         token: signSessionToken(updated.id, updated.sessionEpoch),
       })

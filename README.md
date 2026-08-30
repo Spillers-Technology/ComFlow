@@ -176,7 +176,7 @@ Playwright setup).
 
 ## API surface
 
-Open: `GET /api/health`, `POST /api/auth/login`, `POST /api/auth/register`,
+Open: `GET /api/health`, `POST /api/auth/{login,login/mfa,register}`,
 `POST /api/auth/{verify-email,resend-verification,forgot-password,reset-password}`,
 `GET /api/auth/me`,
 `GET /api/auth/providers`, `GET /api/auth/sso/{provider}/start`,
@@ -192,7 +192,7 @@ Guarded (pass-through in open mode): `/api/calls*`, `/api/scheduled-calls*`,
 `/api/prompts*`, `/api/mailboxes*`, `/api/settings/*`.
 
 Self-service (requires auth, no admin role): `GET/PATCH /api/me`,
-`POST /api/me/password`, `GET/POST/DELETE /api/me/keys*`. API key values are
+`POST /api/me/password`, `/api/me/mfa*`, `GET/POST/DELETE /api/me/keys*`. API key values are
 shown once at creation; only metadata is stored and listed afterward.
 
 Admin-only: `/api/groups*` (RBAC group/membership/mailbox-grant management),
@@ -242,9 +242,12 @@ All env vars are documented in [.env.example](.env.example). Highlights:
 - **Auth**: `COMFLOW_AUTH_REQUIRED` (default `false`), `AUTH_SESSION_SECRET`/TTL.
   Auth-required deployments fail startup unless the signing secret is
   non-placeholder and at least 32 bytes. Other controls:
-  `COMFLOW_PASSWORD_RESET_TTL_HOURS`,
+  `COMFLOW_PASSWORD_RESET_TTL_HOURS`, `COMFLOW_MFA_ENCRYPTION_KEY`,
   `COMFLOW_BOOTSTRAP_ADMIN_{EMAIL,PASSWORD}`, `AUTH_LOCAL_ENABLED`,
   `AUTH_ADMIN_EMAILS` (promote-to-admin-on-SSO-login allowlist).
+  TOTP seeds are encrypted at rest; set a separate stable MFA encryption key
+  before enrollment so rotating the session-signing secret does not require
+  every local user to re-enroll.
 - **Public self-registration**: `COMFLOW_SELF_REGISTRATION=true` enables the
   hosted signup flow only when required auth, local accounts, and email
   notifications are also enabled. `COMFLOW_SELF_REGISTRATION_PLAN=solo`,

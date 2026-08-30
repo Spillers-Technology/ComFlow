@@ -20,6 +20,7 @@ import KeyIcon from '@mui/icons-material/Key'
 import SaveIcon from '@mui/icons-material/Save'
 import { ApiKey } from '../../../shared/src/index.js'
 import { useAuth } from '../app/useAuth'
+import { MfaCard } from '../components/MfaCard'
 import {
   changePassword,
   createApiKey,
@@ -260,6 +261,8 @@ export function ProfilePage() {
             )}
           </CardContent>
         </Card>
+
+        <MfaCard isLocalAccount={isLocalUser} />
 
         <Card>
           <CardHeader title="API keys" subheader="Use these for MCP access." />

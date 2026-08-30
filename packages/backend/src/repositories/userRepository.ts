@@ -19,6 +19,10 @@ type UserRow = {
   password_reset_expires_at: string | null
   password_reset_requested_at: string | null
   session_epoch: number
+  totp_secret_encrypted: string | null
+  totp_enrollment_expires_at: string | null
+  totp_enabled_at: string | null
+  totp_last_counter: number | null
   created_at: string
   updated_at: string
 }
@@ -32,6 +36,10 @@ export type UserRecord = User & {
   passwordResetExpiresAt: string | null
   passwordResetRequestedAt: string | null
   sessionEpoch: number
+  totpSecretEncrypted: string | null
+  totpEnrollmentExpiresAt: string | null
+  totpEnabledAt: string | null
+  totpLastCounter: number | null
 }
 
 function mapRow(row: UserRow): UserRecord {
@@ -54,6 +62,10 @@ function mapRow(row: UserRow): UserRecord {
     passwordResetExpiresAt: row.password_reset_expires_at,
     passwordResetRequestedAt: row.password_reset_requested_at,
     sessionEpoch: row.session_epoch ?? 0,
+    totpSecretEncrypted: row.totp_secret_encrypted,
+    totpEnrollmentExpiresAt: row.totp_enrollment_expires_at,
+    totpEnabledAt: row.totp_enabled_at,
+    totpLastCounter: row.totp_last_counter,
   }
 }
 
@@ -126,6 +138,10 @@ export const userRepository = {
       password_reset_expires_at: null,
       password_reset_requested_at: null,
       session_epoch: 0,
+      totp_secret_encrypted: null,
+      totp_enrollment_expires_at: null,
+      totp_enabled_at: null,
+      totp_last_counter: null,
       created_at: now,
       updated_at: now,
     }
@@ -135,13 +151,15 @@ export const userRepository = {
         email_verified_at, email_verification_token, email_verification_expires_at,
         self_registered_at, password_reset_token, password_reset_expires_at,
         password_reset_requested_at,
-        session_epoch, created_at, updated_at
+        session_epoch, totp_secret_encrypted, totp_enrollment_expires_at,
+        totp_enabled_at, totp_last_counter, created_at, updated_at
       )
       VALUES (@id, @email, @display_name, @password_hash, @role, @auth_provider, @external_id, @tenant_id,
         @email_verified_at, @email_verification_token, @email_verification_expires_at,
         @self_registered_at, @password_reset_token, @password_reset_expires_at,
         @password_reset_requested_at,
-        @session_epoch, @created_at, @updated_at)
+        @session_epoch, @totp_secret_encrypted, @totp_enrollment_expires_at,
+        @totp_enabled_at, @totp_last_counter, @created_at, @updated_at)
     `).run(row)
     return mapRow(row)
   },
@@ -214,6 +232,53 @@ export const userRepository = {
   bumpSessionEpoch(id: string): void {
     db.prepare(`
       UPDATE users SET session_epoch = session_epoch + 1, updated_at = ?
+      WHERE id = ?
+    `).run(new Date().toISOString(), id)
+  },
+
+  setMfaEnrollment(
+    id: string,
+    input: { encryptedSecret: string; expiresAt: string }
+  ): boolean {
+    const result = db.prepare(`
+      UPDATE users
+      SET totp_secret_encrypted = ?, totp_enrollment_expires_at = ?,
+          totp_enabled_at = NULL, totp_last_counter = NULL, updated_at = ?
+      WHERE id = ? AND totp_enabled_at IS NULL
+    `).run(
+      input.encryptedSecret,
+      input.expiresAt,
+      new Date().toISOString(),
+      id
+    )
+    return result.changes === 1
+  },
+
+  enableMfa(id: string, acceptedCounter: number): void {
+    const now = new Date().toISOString()
+    db.prepare(`
+      UPDATE users
+      SET totp_enabled_at = ?, totp_enrollment_expires_at = NULL,
+          totp_last_counter = ?, updated_at = ?
+      WHERE id = ?
+    `).run(now, acceptedCounter, now, id)
+  },
+
+  acceptTotpCounter(id: string, counter: number): boolean {
+    const result = db.prepare(`
+      UPDATE users
+      SET totp_last_counter = ?, updated_at = ?
+      WHERE id = ? AND totp_enabled_at IS NOT NULL
+        AND (totp_last_counter IS NULL OR totp_last_counter < ?)
+    `).run(counter, new Date().toISOString(), id, counter)
+    return result.changes === 1
+  },
+
+  disableMfa(id: string): void {
+    db.prepare(`
+      UPDATE users
+      SET totp_secret_encrypted = NULL, totp_enrollment_expires_at = NULL,
+          totp_enabled_at = NULL, totp_last_counter = NULL, updated_at = ?
       WHERE id = ?
     `).run(new Date().toISOString(), id)
   },

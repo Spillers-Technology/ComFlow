@@ -39,6 +39,7 @@ import { UsageService } from './services/usageService.js'
 import { EmailNotificationService } from './services/emailNotificationService.js'
 import { EngineService } from './services/engineService.js'
 import { MailboxService } from './services/mailboxService.js'
+import { MfaService } from './services/mfaService.js'
 import { PasswordResetService } from './services/passwordResetService.js'
 import { RegistrationService } from './services/registrationService.js'
 import { ScheduledCallService } from './services/scheduledCallService.js'
@@ -76,7 +77,8 @@ export function createApp(): ComFlowApp {
     billingService
   )
   const callReviewService = new CallReviewService()
-  const authService = new AuthService()
+  const mfaService = new MfaService()
+  const authService = new AuthService(undefined, mfaService)
   const ssoService = new SsoService()
   const registrationService = new RegistrationService(emailNotificationService)
   const passwordResetService = new PasswordResetService(emailNotificationService)
@@ -474,7 +476,11 @@ export function createApp(): ComFlowApp {
     createSettingsRouter(engineService, baresipManagementService)
   )
   app.use('/api/calls', requireAuth, createCallsRouter(callReviewService))
-  app.use('/api/me', requireAuth, createMeRouter(registrationService))
+  app.use(
+    '/api/me',
+    requireAuth,
+    createMeRouter(registrationService, mfaService)
+  )
   app.use('/api/prompts', requireAuth, createPromptsRouter(audioPromptService))
   app.use(
     '/api/scheduled-calls',

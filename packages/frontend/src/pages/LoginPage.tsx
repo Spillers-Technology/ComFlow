@@ -20,6 +20,7 @@ import { useAuth } from '../app/useAuth'
 export function LoginPage() {
   const {
     login,
+    completeMfaLogin,
     localEnabled,
     providers,
     selfRegistrationEnabled,
@@ -32,20 +33,104 @@ export function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [challengeToken, setChallengeToken] = useState<string | null>(null)
+  const [mfaCode, setMfaCode] = useState('')
+  const [recoveryMode, setRecoveryMode] = useState(false)
+
+  function goToApp() {
+    const from = (location.state as { from?: string } | null)?.from
+    navigate(from && from !== '/login' ? from : '/calls', { replace: true })
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setSubmitting(true)
     setError(null)
     try {
-      await login(email.trim(), password)
-      const from = (location.state as { from?: string } | null)?.from
-      navigate(from && from !== '/login' ? from : '/calls', { replace: true })
+      const challenge = await login(email.trim(), password)
+      if (challenge) {
+        setChallengeToken(challenge)
+        setPassword('')
+        return
+      }
+      goToApp()
     } catch (reason) {
       setError((reason as Error).message)
     } finally {
       setSubmitting(false)
     }
+  }
+
+  async function handleMfaSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSubmitting(true)
+    setError(null)
+    try {
+      await completeMfaLogin(challengeToken!, mfaCode.trim())
+      goToApp()
+    } catch (reason) {
+      setError((reason as Error).message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (challengeToken) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 2 }}>
+        <Card sx={{ width: '100%', maxWidth: 400 }}>
+          <CardContent>
+            <Stack component="form" spacing={2} onSubmit={handleMfaSubmit}>
+              <Typography component="h1" variant="h4" fontWeight={700}>
+                Two-factor code
+              </Typography>
+              <Typography color="text.secondary">
+                {recoveryMode
+                  ? 'Enter one unused recovery code.'
+                  : 'Enter the 6-digit code from your authenticator.'}
+              </Typography>
+              {error && <Alert severity="error">{error}</Alert>}
+              <TextField
+                label={recoveryMode ? 'Recovery code' : 'Authenticator code'}
+                value={mfaCode}
+                onChange={event => setMfaCode(event.target.value)}
+                autoComplete="one-time-code"
+                inputMode={recoveryMode ? 'text' : 'numeric'}
+                autoFocus
+                required
+                fullWidth
+              />
+              <Button type="submit" variant="contained" disabled={!mfaCode.trim() || submitting}>
+                {submitting ? 'Verifying…' : 'Verify'}
+              </Button>
+              <Button
+                variant="text"
+                onClick={() => {
+                  setRecoveryMode(value => !value)
+                  setMfaCode('')
+                  setError(null)
+                }}
+              >
+                {recoveryMode
+                  ? 'Use an authenticator code'
+                  : 'Use a recovery code'}
+              </Button>
+              <Button
+                variant="text"
+                onClick={() => {
+                  setChallengeToken(null)
+                  setMfaCode('')
+                  setRecoveryMode(false)
+                  setError(null)
+                }}
+              >
+                Back to sign in
+              </Button>
+            </Stack>
+          </CardContent>
+        </Card>
+      </Box>
+    )
   }
 
   return (

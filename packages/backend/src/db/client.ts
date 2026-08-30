@@ -305,6 +305,14 @@ addColumnIfMissing('users', 'password_reset_requested_at', 'TEXT')
 // Stateless sessions carry an epoch snapshot. Incrementing this value revokes
 // every previously-issued session without retaining session tokens.
 addColumnIfMissing('users', 'session_epoch', 'INTEGER NOT NULL DEFAULT 0')
+// TOTP seeds are encrypted with an application-held key. Enrollment is
+// temporary and does not enable MFA until a live code is confirmed.
+addColumnIfMissing('users', 'totp_secret_encrypted', 'TEXT')
+addColumnIfMissing('users', 'totp_enrollment_expires_at', 'TEXT')
+addColumnIfMissing('users', 'totp_enabled_at', 'TEXT')
+// A counter may be accepted only once, even while its six-digit code remains
+// inside the allowed clock-skew window.
+addColumnIfMissing('users', 'totp_last_counter', 'INTEGER')
 addColumnIfMissing(
   'tenant_billing',
   'pending_topup_cents',
@@ -339,6 +347,31 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_audit_tenant_created
     ON audit_log(tenant_id, created_at DESC);
+
+  -- Password acceptance creates an opaque, durable, single-use MFA challenge.
+  -- Attempts and consumption are updated under SQLite's immediate write lock.
+  CREATE TABLE IF NOT EXISTS mfa_login_challenges (
+    token_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    session_epoch INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT NOT NULL,
+    consumed_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_mfa_challenges_user
+    ON mfa_login_challenges(user_id, created_at DESC);
+
+  -- One row per hashed recovery code makes concurrent consumption an atomic
+  -- DELETE instead of a read/modify/write race on a JSON array.
+  CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
+    user_id TEXT NOT NULL,
+    code_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, code_hash),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
 
   -- Holds a DID slot while the provider order is in flight. Counting active
   -- DIDs plus these reservations makes plan caps safe across async requests.
