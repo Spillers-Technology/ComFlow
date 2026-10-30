@@ -188,8 +188,11 @@ db.exec(`
   );
 
   -- Prepaid wallet per tenant. credit_cents is the running total funded via
-  -- Stripe (top-ups + subscription credits); the available balance is
-  -- credit_cents minus aggregated usage_events.billed_cents.
+  -- Stripe (top-ups); the available balance is credit_cents minus aggregated
+  -- usage_events.billed_cents. Subscription lifecycle fields are added below
+  -- via addColumnIfMissing. A subscription's included allowance unlocks the
+  -- plan's DID directly (see BillingService.assertCanProvisionDid); the wallet
+  -- remains for usage overage once included minutes are exhausted.
   CREATE TABLE IF NOT EXISTS tenant_billing (
     tenant_id TEXT PRIMARY KEY,
     stripe_customer_id TEXT,
@@ -319,6 +322,37 @@ addColumnIfMissing(
   'INTEGER NOT NULL DEFAULT 0'
 )
 addColumnIfMissing('tenant_billing', 'pending_topup_expires_at', 'TEXT')
+// Subscription lifecycle (hosted self-service Unit 2). `subscription_id` and
+// `plan` above predate this work and were never populated; they now carry the
+// Stripe subscription id and the internal plan-catalog id respectively.
+// `subscription_price_id` is the Stripe Price id, kept separate from `plan`
+// because a plan could in principle map to more than one price (e.g. an
+// annual price) even though only one price exists today.
+addColumnIfMissing('tenant_billing', 'subscription_status', 'TEXT')
+addColumnIfMissing('tenant_billing', 'subscription_price_id', 'TEXT')
+addColumnIfMissing('tenant_billing', 'current_period_start', 'TEXT')
+addColumnIfMissing('tenant_billing', 'current_period_end', 'TEXT')
+addColumnIfMissing('tenant_billing', 'subscription_grace_period_end', 'TEXT')
+addColumnIfMissing(
+  'tenant_billing',
+  'cancel_at_period_end',
+  'INTEGER NOT NULL DEFAULT 0'
+)
+// Durable guard against opening two concurrent subscription Checkout
+// sessions for one tenant — mirrors the pending_topup_* reservation above.
+addColumnIfMissing('tenant_billing', 'pending_checkout_id', 'TEXT')
+addColumnIfMissing('tenant_billing', 'pending_checkout_expires_at', 'TEXT')
+// Provider identities must resolve to exactly one tenant. A duplicate here
+// would make a signed webhook ambiguous and is safer to reject at startup than
+// to guess which customer receives service or a financial mutation.
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_billing_stripe_customer
+    ON tenant_billing(stripe_customer_id)
+    WHERE stripe_customer_id IS NOT NULL;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_billing_subscription
+    ON tenant_billing(subscription_id)
+    WHERE subscription_id IS NOT NULL;
+`)
 // Backfill pre-4.0 rows as verified. Unverified self-registered rows always
 // carry a token, so the token guard keeps them out of this backfill.
 db.prepare(`

@@ -23,6 +23,11 @@ export function createBillingProvider(): BillingProvider {
         'COMFLOW_BILLING_PROVIDER=stripe requires STRIPE_WEBHOOK_SECRET.'
       )
     }
+    if (!config.billing.subscriptionPlan.stripePriceId) {
+      throw new Error(
+        'COMFLOW_BILLING_PROVIDER=stripe requires STRIPE_SOLO_PRICE_ID for the Solo plan.'
+      )
+    }
     return new StripeBillingProvider({
       secretKey: stripeSecretKey!,
       webhookSecret: stripeWebhookSecret,
@@ -34,4 +39,9 @@ export function createBillingProvider(): BillingProvider {
   return new FakeBillingProvider()
 }
 
-export type { BillingProvider } from './types.js'
+export type {
+  BillingProvider,
+  PaymentEvent,
+  ProviderSubscription,
+  SubscriptionStatus,
+} from './types.js'

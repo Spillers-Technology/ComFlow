@@ -18,6 +18,11 @@ Work merged to `main` since the v4.0.0 tag:
 - Typed baresip `ctrl_tcp` control events safely instead of loosely.
 - Split and landed the reviewable parts of the draft PR #11 work; removed
   leftover prototype code.
+- Subscription lifecycle (hosted self-service M1/Unit 2): recurring Stripe
+  Checkout for the Solo plan, webhook-driven state, cancel/reactivate, a
+  reconcile repair path and a 7-day past-due grace. An active subscription
+  grants a DID without wallet balance; calls and usage still check the wallet
+  (M2). Startup now requires unique Stripe customer and subscription ids.
 - Marked shipped self-serve onboarding roadmap items ("Verified self-serve
   signup", "Guided call forwarding") `Done` on the landing page, and published
   the hosted self-service roadmap doc.
