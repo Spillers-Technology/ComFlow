@@ -10,7 +10,16 @@ per-version `docs/releases/` notes.
 
 ## [Unreleased]
 
-Work merged to `main` since the v4.0.0 tag:
+## [4.1.0] - 2026-10-30
+
+> **Before deploying over an existing database:** this release adds unique indexes on
+> `tenant_billing.stripe_customer_id` and `subscription_id`, and the server will not start if
+> two tenants share either. Check first; this should return no rows:
+> `SELECT stripe_customer_id, COUNT(*) FROM tenant_billing WHERE stripe_customer_id IS NOT NULL GROUP BY 1 HAVING COUNT(*) > 1;`
+> Do not enable `COMFLOW_BILLING_PROVIDER=stripe` with a real Solo price until the call path honours
+> subscriptions (M2): a subscriber with an empty wallet can get a number that cannot take calls.
+
+Changes since v4.0.0:
 
 - Fixed a graceful-shutdown bug: services and the SQLite connection now drain
   cleanly on shutdown instead of terminating abruptly.
