@@ -2857,6 +2857,29 @@ async function main() {
     })
   })
 
+  await runTest('OpenAI extraction coerces off-list intent/urgency instead of failing', async () => {
+    const { normalizeOpenAiExtraction, OPENAI_EXTRACTION_SYSTEM_PROMPT } = await import(
+      './providers/llm/openai.js'
+    )
+    const result = normalizeOpenAiExtraction({
+      callerName: 'Dana',
+      company: '',
+      callbackNumber: '+15550100',
+      intent: 'callback_request',
+      urgency: 'urgent',
+      summary: 'Wants a call back.',
+    })
+    assert.equal(result.intent, 'unknown')
+    assert.equal(result.urgency, 'unknown')
+    assert.equal(result.company, null)
+    assert.equal(result.callerName, 'Dana')
+    const valid = normalizeOpenAiExtraction({ intent: 'sales_request', urgency: 'high', summary: 's' })
+    assert.equal(valid.intent, 'sales_request')
+    assert.equal(valid.urgency, 'high')
+    assert.equal(valid.callerName, null)
+    assert.match(OPENAI_EXTRACTION_SYSTEM_PROMPT, /support_request/)
+  })
+
   const { db } = await getModules()
   db.close()
   fs.rmSync(testDataDir, { recursive: true, force: true })

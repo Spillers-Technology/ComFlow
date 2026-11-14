@@ -10,6 +10,14 @@ per-version `docs/releases/` notes.
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenAI voicemail extraction no longer fails when the model returns an
+  `intent`/`urgency` outside the allowed set (e.g. `callback_request`): the
+  allowed values are listed in the prompt and off-list values are coerced to
+  `unknown`. Previously the whole extraction (and the admin "Test LLM" check)
+  failed for that call.
+
 ## [4.1.0] - 2026-10-30
 
 > **Before deploying over an existing database:** this release adds unique indexes on
