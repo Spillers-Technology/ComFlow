@@ -10,6 +10,11 @@ on:
     branches: [main]
     tags: ['v*.*.*']
   workflow_dispatch:
+    inputs:
+      baresip_tag:
+        description: Extra tag for the baresip SIP-edge image (e.g. 4.1.0)
+        required: false
+        default: ''
 
 env:
   REGISTRY: ghcr.io
@@ -59,3 +64,45 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # SIP edge sidecar (infra/baresip). The k8s deployment runs it next to the
+  # ComFlow container, so it is published alongside, with the same tag scheme.
+  build-push-baresip:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}-baresip
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=${{ inputs.baresip_tag }},enable=${{ inputs.baresip_tag != '' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: infra/baresip
+          file: infra/baresip/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=baresip
+          cache-to: type=gha,mode=max,scope=baresip
